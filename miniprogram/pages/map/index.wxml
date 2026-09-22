@@ -1,0 +1,113 @@
+<!--
+  地图首页。
+
+  选中逻辑：真机验证发现基础库 3.17.3 不发 polygontap 事件，
+  所以只监听地图自身的点击（tap / poitap，两者都带回经纬度），
+  再用 utils/geo.js 的矩形命中算法判断点到了哪个区域。
+  多边形只负责显示，不参与交互。
+-->
+<map
+  id="market-map"
+  class="map"
+  latitude="{{latitude}}"
+  longitude="{{longitude}}"
+  scale="{{scale}}"
+  polygons="{{polygons}}"
+  bindregionchange="onRegionChange"
+  bindpoitap="onPoiTap"
+  bindtap="onMapTap"
+></map>
+
+<!-- 打过分的夜市，在它的中心浮一个会晃的星星气泡 -->
+<view
+  wx:for="{{bubbles}}"
+  wx:key="key"
+  class="bubble"
+  style="left: {{item.x}}px; top: {{item.y}}px; animation-delay: {{item.delay}}s;"
+>⭐</view>
+
+<!-- 右上角入口：我的 -->
+<view class="mine" bindtap="onOpenMine">{{T.mineEntry}}</view>
+
+<!-- 底部提示：只有没选中任何区域、且不在加载/报错时才显示 -->
+<view class="hint" wx:if="{{!selectedZone && !loadError}}">
+  {{loading ? T.mapLoading : (zoneCount === 0 ? T.mapEmpty : T.mapHintTap)}}
+</view>
+
+<!-- 加载失败可以点一下重试，所以这一条不吃穿透 -->
+<view class="errorbar" wx:if="{{loadError}}" bindtap="onRetry">
+  {{T.mapLoadFailed}}：{{loadError}} · {{T.mapRetry}}
+</view>
+
+<!--
+  区域详情卡片。
+  后续阶段会把内容挂进这里：
+    阶段6 星级打分入口
+    阶段8 摊点列表（顺带把摊点数量的真实数字填上）
+    阶段7 区域留言
+    阶段11 给开发者留言入口
+-->
+<view class="card {{cardClosing ? 'card--closing' : ''}}" wx:if="{{selectedZone}}">
+  <view class="card__handle"></view>
+
+  <view class="card__title">{{selectedZone.displayName}}</view>
+  <view class="card__sub" wx:if="{{selectedZone.displayNameSub}}">{{selectedZone.displayNameSub}}</view>
+
+  <view class="card__rows">
+    <view class="card__row" wx:if="{{selectedZone.business_hours}}">
+      <text class="card__label">{{T.cardHours}}</text>
+      <text class="card__value">{{selectedZone.business_hours}}</text>
+    </view>
+
+    <view class="card__row">
+      <text class="card__label">{{T.cardRating}}</text>
+      <text class="card__value {{selectedZone.ratingConfident ? '' : 'card__value--muted'}}">{{selectedZone.ratingText}}</text>
+    </view>
+
+    <view class="card__row">
+      <text class="card__label">{{T.cardMyRating}}</text>
+      <view class="rate">
+        <view class="rate__top">
+          <view class="stars">
+            <text
+              wx:for="{{starList}}"
+              wx:key="*this"
+              class="star {{item <= selectedZone.myStars ? 'star--on' : ''}}"
+              data-star="{{item}}"
+              bindtap="onTapStar"
+            >★</text>
+          </view>
+          <text
+            class="rate__status {{selectedZone.statusPending ? 'rate__status--pending' : ''}}"
+            wx:if="{{selectedZone.statusText}}"
+          >{{selectedZone.statusText}}</text>
+        </view>
+        <view class="rate__hint">{{selectedZone.ratingHint}}</view>
+      </view>
+    </view>
+
+    <view class="card__row">
+      <text class="card__label">{{T.cardStallCount}}</text>
+      <text class="card__value card__value--muted">{{T.cardStallCountEmpty}}</text>
+    </view>
+  </view>
+
+  <!--
+    四个维度：只摆词，不摆维度名。
+    选了星星之后才出现——没打分就先填这些没有意义。
+  -->
+  <view class="aspects" wx:if="{{selectedZone.rated}}">
+    <view class="aspect" wx:for="{{selectedZone.aspectRows}}" wx:key="dimensionKey" wx:for-item="row">
+      <text
+        wx:for="{{row.options}}"
+        wx:key="value"
+        wx:for-item="opt"
+        class="chip {{opt.selected ? 'chip--on' : ''}}"
+        data-dimension="{{row.dimensionKey}}"
+        data-value="{{opt.value}}"
+        bindtap="onPickAspect"
+      >{{opt.label}}</text>
+    </view>
+  </view>
+
+</view>

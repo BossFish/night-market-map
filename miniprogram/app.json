@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/map/index",
+    "pages/mine/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#14181F",
+    "navigationBarTitleText": "西安小吃夜市地图",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#14181F",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

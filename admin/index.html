@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>西安小吃夜市地图 · 管理后台</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <header class="topbar">
+    <div class="topbar__title">西安小吃夜市地图 · 管理后台</div>
+    <div class="topbar__actions">
+      <button id="btnReload" class="btn">刷新</button>
+      <button id="btnLogout" class="btn btn--ghost">退出</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- 未登录：只显示密钥输入 -->
+    <section id="login" class="card login hidden">
+      <h2 class="login__title">输入后台密钥</h2>
+      <p class="muted">
+        密钥就是云函数 <code>admin</code> 的环境变量 <code>ADMIN_KEY</code> 的值。
+        输入一次之后会记在这台电脑的浏览器里。
+      </p>
+      <input id="keyInput" class="input" type="password" placeholder="后台密钥" autocomplete="current-password">
+      <button id="btnLogin" class="btn btn--primary btn--block">进入</button>
+    </section>
+
+    <!-- 已登录：区域管理 -->
+    <section id="panel" class="hidden">
+      <div class="toolbar">
+        <button id="btnNew" class="btn btn--primary">新增区域</button>
+        <span class="muted" id="countText"></span>
+      </div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>营业时间</th>
+            <th>东北角</th>
+            <th>西南角</th>
+            <th>排序</th>
+            <th>状态</th>
+            <th class="table__ops">操作</th>
+          </tr>
+        </thead>
+        <tbody id="zoneRows"></tbody>
+      </table>
+
+      <p class="muted tips">
+        区域在数据库里只存两个对角点：<b>东北角</b>和<b>西南角</b>。另外两个角是算出来的，不用填。
+        修改坐标后，小程序重新打开就能看到绿框移动。
+      </p>
+
+      <div class="demo">
+        <div class="demo__text">
+          <b>示例数据</b>：一键生成几个带不同评价数量和推荐度的夜市，用来预览小程序上的各种显示状态。
+          生成的区域和评分都带标记，可以随时整批清掉，不会碰你自己录的数据。
+        </div>
+        <div class="demo__actions">
+          <button id="btnSeedDemo" class="btn">生成示例数据</button>
+          <button id="btnClearDemo" class="btn btn--danger">清除示例数据</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 编辑弹层 -->
+  <div id="editor" class="modal hidden">
+    <div class="modal__mask" data-close="1"></div>
+    <div class="modal__box modal__box--wide">
+      <h2 id="editorTitle" class="modal__title">编辑区域</h2>
+
+      <div class="editor">
+
+        <div class="form editor__form">
+          <label class="field">
+            <span class="field__label">中文名称 <em>*</em></span>
+            <input id="fNameZh" class="input" type="text" placeholder="回民街（北院门）">
+          </label>
+
+          <label class="field">
+            <span class="field__label">英文名称</span>
+            <input id="fNameEn" class="input" type="text" placeholder="Muslim Quarter (Beiyuanmen)">
+          </label>
+
+          <label class="field">
+            <span class="field__label">营业时间</span>
+            <input id="fHours" class="input" type="text" placeholder="18:00 - 次日 02:00">
+          </label>
+
+          <div class="row">
+            <label class="field field--grow">
+              <span class="field__label">排序（数字越小越靠前）</span>
+              <input id="fSort" class="input" type="number" step="1">
+            </label>
+            <label class="field field--check">
+              <input id="fVisible" type="checkbox">
+              <span>在小程序里显示</span>
+            </label>
+          </div>
+
+          <fieldset class="fieldset">
+            <legend>东北角（地图上偏右上）</legend>
+            <div class="row">
+              <label class="field field--grow">
+                <span class="field__label">纬度 latitude</span>
+                <input id="fNeLat" class="input" type="text" placeholder="34.2685">
+              </label>
+              <label class="field field--grow">
+                <span class="field__label">经度 longitude</span>
+                <input id="fNeLng" class="input" type="text" placeholder="108.9418">
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend>西南角（地图上偏左下）</legend>
+            <div class="row">
+              <label class="field field--grow">
+                <span class="field__label">纬度 latitude</span>
+                <input id="fSwLat" class="input" type="text" placeholder="34.2630">
+              </label>
+              <label class="field field--grow">
+                <span class="field__label">经度 longitude</span>
+                <input id="fSwLng" class="input" type="text" placeholder="108.9385">
+              </label>
+            </div>
+          </fieldset>
+
+          <div id="sizeHint" class="hintbox"></div>
+        </div>
+
+        <div class="editor__map">
+          <div id="mapContainer" class="mapcanvas"></div>
+          <div id="mapStatus" class="mapstatus">地图加载中…</div>
+          <p class="muted tips">
+            <b>在地图上点两下</b>就能框出区域：先点一个角，再点斜对面那个角。
+            想调整就<b>再点两下重画</b>，或者直接改左边的数字，地图上的框会跟着动。
+          </p>
+        </div>
+
+      </div>
+
+      <div class="modal__actions">
+        <button id="btnCancel" class="btn btn--ghost">取消</button>
+        <button id="btnSave" class="btn btn--primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="map.config.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

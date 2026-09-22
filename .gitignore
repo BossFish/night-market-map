@@ -1,0 +1,13 @@
+# 依赖
+node_modules/
+
+# 微信开发者工具的本地私有配置（含个人设置，不进版本库）
+project.private.config.json
+
+# 管理后台的本地配置：里面有云函数地址和腾讯地图 key，只属于这台机器
+admin/server.config.js
+admin/map.config.js
+
+# 系统文件
+.DS_Store
+Thumbs.db

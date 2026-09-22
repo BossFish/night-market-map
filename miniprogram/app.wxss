@@ -1,0 +1,16 @@
+/* 全局主题变量。
+   map 组件的覆盖物颜色走 JS、读不到这里的变量，
+   所以 utils/theme.js 里另有一份，两处需要保持一致。 */
+page {
+  --brand-green: #22C55E;
+  --brand-green-dark: #16A34A;
+  --bg-dark: #14181F;
+  --text-primary: #1F2430;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --divider: #E5E7EB;
+
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+}
