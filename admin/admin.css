@@ -257,6 +257,63 @@ code {
   gap: 10px;
 }
 
+/* ---------- 摊位列表 ---------- */
+
+.stall-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.stall-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.stall-list__item:last-child {
+  border-bottom: none;
+}
+
+.stall-list__item:hover {
+  background: #F9FAFB;
+}
+
+.stall-list__item--active {
+  background: #F0FDF4;
+}
+
+.stall-list__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stall-list__price {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.stall-list__empty {
+  padding: 22px;
+  color: var(--ink-3);
+  font-size: 13px;
+  text-align: center;
+}
+
+.stall-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
 /* ---------- 弹层 ---------- */
 
 .modal {

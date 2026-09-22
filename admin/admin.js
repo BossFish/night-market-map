@@ -246,6 +246,7 @@ function buildRow(zone) {
   var ops = document.createElement('div')
   ops.className = 'table__ops-cell'
   ops.appendChild(smallButton('编辑', '', function () { openEditor(zone) }))
+  ops.appendChild(smallButton('摊位', '', function () { openStallEditor(zone) }))
   ops.appendChild(smallButton(visible ? '下架' : '上架', '', function () { toggleVisible(zone) }))
   ops.appendChild(smallButton('删除', 'btn--danger', function () { removeZone(zone) }))
   opsTd.appendChild(ops)
@@ -290,6 +291,10 @@ function closeEditor() {
 
 function numberToText(value) {
   return typeof value === 'number' && isFinite(value) ? String(value) : ''
+}
+
+function round6(value) {
+  return Math.round(value * 1e6) / 1e6
 }
 
 function collectForm() {
@@ -739,6 +744,411 @@ function onFormChanged() {
   syncMapFromForm()
 }
 
+// ---------- 摊位编辑 ----------
+
+var stallView = {
+  map: null,
+  polygonLayer: null,
+  ready: false,
+  readyPromise: null,
+  zone: null,
+  stalls: [],
+  selectedId: '',
+  // 点两下画摊位时先记下的第一个角
+  pendingCorner: null,
+  drawing: false
+}
+
+function setStallStatus(text, kind) {
+  var box = el('stallMapStatus')
+  box.className = 'mapstatus' + (kind ? ' mapstatus--' + kind : '')
+  box.textContent = text
+}
+
+/** 矩形的四个顶点，腾讯地图的多边形要的是闭合环 */
+function tmapRectPath(ne, sw) {
+  return [
+    new TMap.LatLng(ne.latitude, sw.longitude),
+    new TMap.LatLng(ne.latitude, ne.longitude),
+    new TMap.LatLng(sw.latitude, ne.longitude),
+    new TMap.LatLng(sw.latitude, sw.longitude)
+  ]
+}
+
+function ensureStallMap() {
+  if (stallView.ready) return Promise.resolve()
+  if (stallView.readyPromise) return stallView.readyPromise
+
+  setStallStatus('地图加载中…')
+
+  stallView.readyPromise = loadTencentMapScript()
+    .then(function () {
+      stallView.map = new TMap.Map(el('stallMapContainer'), {
+        center: new TMap.LatLng(DEFAULT_CENTER.latitude, DEFAULT_CENTER.longitude),
+        zoom: 17,
+        pitch: 0,
+        rotation: 0
+      })
+
+      stallView.map.on('click', onStallMapClick)
+
+      stallView.polygonLayer = new TMap.MultiPolygon({
+        map: stallView.map,
+        styles: {
+          zone: new TMap.PolygonStyle({
+            color: 'rgba(34, 197, 94, 0.18)',
+            borderColor: '#15803D',
+            borderWidth: 2
+          }),
+          stall: new TMap.PolygonStyle({
+            color: 'rgba(249, 115, 22, 0.32)',
+            borderColor: '#EA580C',
+            borderWidth: 2
+          }),
+          stallActive: new TMap.PolygonStyle({
+            color: 'rgba(249, 115, 22, 0.58)',
+            borderColor: '#C2410C',
+            borderWidth: 3
+          })
+        },
+        geometries: []
+      })
+
+      stallView.ready = true
+      setStallStatus('地图就绪。点「新增摊位」然后在地图上点两下。', 'ok')
+      return true
+    })
+    .catch(function (err) {
+      stallView.readyPromise = null
+      throw err
+    })
+
+  return stallView.readyPromise
+}
+
+function focusStallMap() {
+  if (!stallView.ready || !stallView.zone) return
+
+  var zone = stallView.zone
+  if (!zone.ne || !zone.sw) return
+
+  stallView.map.setCenter(
+    new TMap.LatLng(
+      (zone.ne.latitude + zone.sw.latitude) / 2,
+      (zone.ne.longitude + zone.sw.longitude) / 2
+    )
+  )
+  // 17 级大概能看到五百米宽，正好放下一个夜市区域
+  stallView.map.setZoom(17)
+}
+
+function drawStallShapes() {
+  if (!stallView.ready) return
+
+  var geometries = []
+
+  if (stallView.zone && stallView.zone.ne && stallView.zone.sw) {
+    geometries.push({
+      id: 'zone',
+      styleId: 'zone',
+      paths: [tmapRectPath(stallView.zone.ne, stallView.zone.sw)]
+    })
+  }
+
+  stallView.stalls.forEach(function (stall) {
+    if (!stall.ne || !stall.sw) return
+    geometries.push({
+      id: stall._id,
+      styleId: stall._id === stallView.selectedId ? 'stallActive' : 'stall',
+      paths: [tmapRectPath(stall.ne, stall.sw)]
+    })
+  })
+
+  stallView.polygonLayer.setGeometries(geometries)
+}
+
+function openStallEditor(zone) {
+  stallView.zone = zone
+  stallView.selectedId = ''
+  stallView.pendingCorner = null
+  stallView.drawing = false
+  stallView.stalls = []
+
+  el('stallZoneName').textContent = zone.name_zh || ''
+  fillStallForm(null)
+  renderStallList()
+  el('stallEditor').classList.remove('hidden')
+
+  // 弹层显示之后容器才有尺寸，地图不能在此之前创建
+  setTimeout(function () {
+    ensureStallMap()
+      .then(function () {
+        focusStallMap()
+        drawStallShapes()
+      })
+      .catch(function (err) {
+        setStallStatus('地图没能加载：' + err.message + '。摊位列表仍然能编辑，只是没法在地图上画框。', 'error')
+      })
+      .then(function () {
+        loadStalls()
+      })
+  }, 0)
+}
+
+function closeStallEditor() {
+  el('stallEditor').classList.add('hidden')
+  stallView.zone = null
+  stallView.selectedId = ''
+  stallView.pendingCorner = null
+  stallView.drawing = false
+  stallView.stalls = []
+}
+
+function loadStalls() {
+  if (!stallView.zone) return Promise.resolve()
+
+  return api('stalls.list', { zoneId: stallView.zone._id })
+    .then(function (list) {
+      stallView.stalls = list || []
+      renderStallList()
+      drawStallShapes()
+    })
+    .catch(function (err) {
+      showBanner('读取摊位失败：' + err.message, 'error')
+    })
+}
+
+function renderStallList() {
+  var box = el('stallList')
+  box.innerHTML = ''
+  el('stallCountText').textContent = stallView.stalls.length ? '共 ' + stallView.stalls.length + ' 个' : ''
+
+  if (!stallView.stalls.length) {
+    var empty = document.createElement('div')
+    empty.className = 'stall-list__empty'
+    empty.textContent = '还没有摊位，点「新增摊位」开始画'
+    box.appendChild(empty)
+    return
+  }
+
+  stallView.stalls.forEach(function (stall) {
+    var item = document.createElement('div')
+    item.className =
+      'stall-list__item' + (stall._id === stallView.selectedId ? ' stall-list__item--active' : '')
+
+    var name = document.createElement('span')
+    name.className = 'stall-list__name'
+    name.textContent = stall.name_zh || '（未命名）'
+    item.appendChild(name)
+
+    if (stall.price_range) {
+      var price = document.createElement('span')
+      price.className = 'stall-list__price'
+      price.textContent = stall.price_range
+      item.appendChild(price)
+    }
+
+    item.addEventListener('click', function () {
+      selectStall(stall)
+    })
+
+    box.appendChild(item)
+  })
+}
+
+function selectStall(stall) {
+  stallView.selectedId = stall._id
+  stallView.pendingCorner = null
+  stallView.drawing = false
+
+  fillStallForm(stall)
+  renderStallList()
+  drawStallShapes()
+  setStallStatus('正在编辑「' + (stall.name_zh || '') + '」。改完记得点保存。', 'ok')
+}
+
+function startNewStall() {
+  stallView.selectedId = ''
+  stallView.pendingCorner = null
+  stallView.drawing = true
+
+  fillStallForm(null)
+  renderStallList()
+  drawStallShapes()
+  setStallStatus('在地图上点两下框出摊位位置：先点一个角，再点斜对面那个角。', 'ok')
+}
+
+function fillStallForm(stall) {
+  el('sNameZh').value = stall ? stall.name_zh || '' : ''
+  el('sNameEn').value = stall ? stall.name_en || '' : ''
+  el('sPrice').value = stall ? stall.price_range || '' : ''
+  el('sSort').value = stall
+    ? stall.sort_order == null
+      ? 0
+      : stall.sort_order
+    : stallView.stalls.length + 1
+
+  var ne = (stall && stall.ne) || {}
+  var sw = (stall && stall.sw) || {}
+  el('sNeLat').value = numberToText(ne.latitude)
+  el('sNeLng').value = numberToText(ne.longitude)
+  el('sSwLat').value = numberToText(sw.latitude)
+  el('sSwLng').value = numberToText(sw.longitude)
+
+  el('stallFormLegend').textContent = stall ? '正在编辑：' + (stall.name_zh || '') : '新增摊位'
+  el('btnDeleteStall').disabled = !stall
+
+  updateStallSizeHint()
+}
+
+function evaluateStallForm() {
+  var nameZh = el('sNameZh').value.trim()
+  if (!nameZh) return { error: '摊位名称不能为空' }
+
+  var fields = [
+    { label: '东北角纬度', inputId: 'sNeLat' },
+    { label: '东北角经度', inputId: 'sNeLng' },
+    { label: '西南角纬度', inputId: 'sSwLat' },
+    { label: '西南角经度', inputId: 'sSwLng' }
+  ]
+
+  var values = {}
+  for (var i = 0; i < fields.length; i++) {
+    var raw = el(fields[i].inputId).value.trim()
+    var value = Number(raw)
+    if (!raw || !isFinite(value)) return { error: fields[i].label + '要填数字' }
+    values[fields[i].inputId] = value
+  }
+
+  var ne = { latitude: values.sNeLat, longitude: values.sNeLng }
+  var sw = { latitude: values.sSwLat, longitude: values.sSwLng }
+
+  if (ne.latitude <= sw.latitude) {
+    return { error: '东北角的纬度必须大于西南角的纬度，现在是反的' }
+  }
+  if (ne.longitude <= sw.longitude) {
+    return { error: '东北角的经度必须大于西南角的经度，现在是反的' }
+  }
+
+  return {
+    payload: {
+      name_zh: nameZh,
+      name_en: el('sNameEn').value.trim(),
+      price_range: el('sPrice').value.trim(),
+      sort_order: Number(el('sSort').value) || 0,
+      ne: ne,
+      sw: sw
+    },
+    size: rectSizeMeters(ne, sw)
+  }
+}
+
+function updateStallSizeHint() {
+  var box = el('stallSizeHint')
+  var result = evaluateStallForm()
+
+  if (result.error) {
+    box.className = 'hintbox'
+    box.textContent = result.error
+    return
+  }
+
+  box.className = 'hintbox hintbox--ok'
+  box.textContent =
+    '摊位尺寸：东西约 ' + result.size.width + ' 米，南北约 ' + result.size.height + ' 米'
+}
+
+function onStallMapClick(evt) {
+  if (!stallView.drawing) return
+
+  var pos = (evt && (evt.latLng || evt.latLngs)) || null
+  if (Array.isArray(pos)) pos = pos[0]
+
+  var lat = latOf(pos)
+  var lng = lngOf(pos)
+  if (!isFinite(lat) || !isFinite(lng)) return
+
+  if (!stallView.pendingCorner) {
+    stallView.pendingCorner = { latitude: lat, longitude: lng }
+    setStallStatus('已记住第一个角。再点一下斜对面那个角。', 'ok')
+    return
+  }
+
+  var first = stallView.pendingCorner
+  var second = { latitude: lat, longitude: lng }
+  stallView.pendingCorner = null
+  stallView.drawing = false
+
+  el('sNeLat').value = String(round6(Math.max(first.latitude, second.latitude)))
+  el('sNeLng').value = String(round6(Math.max(first.longitude, second.longitude)))
+  el('sSwLat').value = String(round6(Math.min(first.latitude, second.latitude)))
+  el('sSwLng').value = String(round6(Math.min(first.longitude, second.longitude)))
+
+  updateStallSizeHint()
+  el('sNameZh').focus()
+  setStallStatus('框好了。填个摊位名称，然后点保存。', 'ok')
+}
+
+function saveStall() {
+  var result = evaluateStallForm()
+  if (result.error) {
+    showBanner(result.error, 'error')
+    updateStallSizeHint()
+    return
+  }
+
+  var payload = Object.assign({ zoneId: stallView.zone._id }, result.payload)
+  var action = 'stalls.create'
+  if (stallView.selectedId) {
+    action = 'stalls.update'
+    payload._id = stallView.selectedId
+  }
+
+  el('btnSaveStall').disabled = true
+
+  api(action, payload)
+    .then(function (res) {
+      if (res && res._id) stallView.selectedId = res._id
+      flash('已保存')
+      return loadStalls()
+    })
+    .then(function () {
+      var current = stallView.stalls.filter(function (stall) {
+        return stall._id === stallView.selectedId
+      })[0]
+      if (current) fillStallForm(current)
+      renderStallList()
+      drawStallShapes()
+    })
+    .catch(function (err) {
+      showBanner('保存失败：' + err.message, 'error')
+    })
+    .then(function () {
+      el('btnSaveStall').disabled = false
+    })
+}
+
+function removeStall() {
+  var current = stallView.stalls.filter(function (stall) {
+    return stall._id === stallView.selectedId
+  })[0]
+  if (!current) return
+
+  var name = current.name_zh || '这个摊位'
+  if (!window.confirm('删除「' + name + '」？\n\n小程序上立刻消失，投票记录会保留。')) return
+
+  api('stalls.delete', { _id: current._id })
+    .then(function () {
+      stallView.selectedId = ''
+      fillStallForm(null)
+      flash('已删除')
+      return loadStalls()
+    })
+    .catch(function (err) {
+      showBanner('删除失败：' + err.message, 'error')
+    })
+}
+
 // ---------- 启动 ----------
 
 function bindEvents() {
@@ -758,8 +1168,25 @@ function bindEvents() {
   el('editor').addEventListener('click', function (e) {
     if (e.target.dataset && e.target.dataset.close) closeEditor()
   })
+
+  el('btnNewStall').addEventListener('click', startNewStall)
+  el('btnSaveStall').addEventListener('click', saveStall)
+  el('btnDeleteStall').addEventListener('click', removeStall)
+  el('btnCloseStall').addEventListener('click', closeStallEditor)
+  el('stallEditor').addEventListener('click', function (e) {
+    if (e.target.dataset && e.target.dataset.closeStall) closeStallEditor()
+  })
+  ;['sNeLat', 'sNeLng', 'sSwLat', 'sSwLng', 'sNameZh'].forEach(function (id) {
+    el(id).addEventListener('input', updateStallSizeHint)
+  })
+
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !el('editor').classList.contains('hidden')) closeEditor()
+    if (e.key !== 'Escape') return
+    if (!el('stallEditor').classList.contains('hidden')) {
+      closeStallEditor()
+      return
+    }
+    if (!el('editor').classList.contains('hidden')) closeEditor()
   })
 
   ;['fNameZh', 'fNeLat', 'fNeLng', 'fSwLat', 'fSwLng'].forEach(function (id) {

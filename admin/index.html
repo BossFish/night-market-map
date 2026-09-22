@@ -72,6 +72,90 @@
 
   </main>
 
+  <!-- 摊位编辑弹层 -->
+  <div id="stallEditor" class="modal hidden">
+    <div class="modal__mask" data-close-stall="1"></div>
+    <div class="modal__box modal__box--wide">
+      <h2 class="modal__title">摊位 · <span id="stallZoneName"></span></h2>
+
+      <div class="editor">
+
+        <div class="form editor__form">
+          <div class="toolbar">
+            <button id="btnNewStall" class="btn btn--primary btn--small">新增摊位</button>
+            <span class="muted" id="stallCountText"></span>
+          </div>
+
+          <div id="stallList" class="stall-list"></div>
+
+          <fieldset class="fieldset">
+            <legend id="stallFormLegend">摊位信息</legend>
+
+            <label class="field">
+              <span class="field__label">摊位名称 <em>*</em></span>
+              <input id="sNameZh" class="input" type="text" placeholder="老马家烤肉">
+            </label>
+            <label class="field">
+              <span class="field__label">英文名称</span>
+              <input id="sNameEn" class="input" type="text" placeholder="Lao Ma BBQ">
+            </label>
+            <label class="field">
+              <span class="field__label">价目区间</span>
+              <input id="sPrice" class="input" type="text" placeholder="10-30 元">
+            </label>
+            <label class="field">
+              <span class="field__label">排序（数字越小越靠前）</span>
+              <input id="sSort" class="input" type="number" step="1">
+            </label>
+
+            <div class="row">
+              <label class="field field--grow">
+                <span class="field__label">东北角纬度</span>
+                <input id="sNeLat" class="input" type="text">
+              </label>
+              <label class="field field--grow">
+                <span class="field__label">东北角经度</span>
+                <input id="sNeLng" class="input" type="text">
+              </label>
+            </div>
+            <div class="row">
+              <label class="field field--grow">
+                <span class="field__label">西南角纬度</span>
+                <input id="sSwLat" class="input" type="text">
+              </label>
+              <label class="field field--grow">
+                <span class="field__label">西南角经度</span>
+                <input id="sSwLng" class="input" type="text">
+              </label>
+            </div>
+
+            <div id="stallSizeHint" class="hintbox"></div>
+
+            <div class="row">
+              <button id="btnSaveStall" class="btn btn--primary">保存摊位</button>
+              <button id="btnDeleteStall" class="btn btn--danger">删除摊位</button>
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="editor__map">
+          <div id="stallMapContainer" class="mapcanvas"></div>
+          <div id="stallMapStatus" class="mapstatus">地图加载中…</div>
+          <p class="muted tips">
+            点「新增摊位」后，在地图上<b>点两下</b>框出摊位位置（先点一个角，再点斜对面那个角），
+            然后填个名字保存。<br>
+            绿色是夜市区域，橙色是已经画好的摊位。
+          </p>
+        </div>
+
+      </div>
+
+      <div class="modal__actions">
+        <button id="btnCloseStall" class="btn btn--ghost">完成</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 编辑弹层 -->
   <div id="editor" class="modal hidden">
     <div class="modal__mask" data-close="1"></div>

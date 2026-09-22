@@ -16,6 +16,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 const db = cloud.database()
 const COLLECTION = 'zones'
+const STALLS = 'stalls'
 
 // 经纬度的合理范围，放得很宽（覆盖整个中国），以后往别的城市扩展也不用改。
 // 用途是挡住明显填错的坐标。
@@ -98,17 +99,12 @@ async function rejectIfBadKey(event) {
 }
 
 /**
- * 校验并整理前端传来的区域数据。
- * 返回 { error: '...' } 或 { doc: {...} }。
+ * 校验一个矩形（东北角 + 西南角）。
+ * 区域和摊位共用这套规则。返回 { error } 或 { ne, sw }。
  */
-function normalizeZoneInput(payload) {
-  const p = payload || {}
-
-  const nameZh = String(p.name_zh || '').trim()
-  if (!nameZh) return { error: '中文名称不能为空' }
-
-  const ne = p.ne || {}
-  const sw = p.sw || {}
+function validateRect(rawNe, rawSw) {
+  const ne = rawNe || {}
+  const sw = rawSw || {}
 
   const neLat = Number(ne.latitude)
   const neLng = Number(ne.longitude)
@@ -138,16 +134,126 @@ function normalizeZoneInput(payload) {
   }
 
   return {
+    ne: { latitude: neLat, longitude: neLng },
+    sw: { latitude: swLat, longitude: swLng }
+  }
+}
+
+/**
+ * 校验并整理前端传来的区域数据。
+ * 返回 { error: '...' } 或 { doc: {...} }。
+ */
+function normalizeZoneInput(payload) {
+  const p = payload || {}
+
+  const nameZh = String(p.name_zh || '').trim()
+  if (!nameZh) return { error: '中文名称不能为空' }
+
+  const rect = validateRect(p.ne, p.sw)
+  if (rect.error) return rect
+
+  return {
     doc: {
       name_zh: nameZh,
       name_en: String(p.name_en || '').trim(),
       business_hours: String(p.business_hours || '').trim(),
-      ne: { latitude: neLat, longitude: neLng },
-      sw: { latitude: swLat, longitude: swLng },
+      ne: rect.ne,
+      sw: rect.sw,
       sort_order: Number(p.sort_order) || 0,
       is_visible: p.is_visible !== false
     }
   }
+}
+
+// ---------- 摊位 ----------
+
+/**
+ * 校验并整理摊位数据。
+ *
+ * price_range 目前是后台手填的一段文字（例如「10-30 元」）。
+ * 如果以后改成"用户投票、系统算均价"，这一项换成看价格投票集合即可，
+ * 摊位的其余结构不用动。
+ */
+function normalizeStallInput(payload) {
+  const p = payload || {}
+
+  const nameZh = String(p.name_zh || '').trim()
+  if (!nameZh) return { error: '摊位名称不能为空' }
+
+  const rect = validateRect(p.ne, p.sw)
+  if (rect.error) return rect
+
+  return {
+    doc: {
+      name_zh: nameZh,
+      name_en: String(p.name_en || '').trim(),
+      price_range: String(p.price_range || '').trim(),
+      ne: rect.ne,
+      sw: rect.sw,
+      sort_order: Number(p.sort_order) || 0
+    }
+  }
+}
+
+async function listStalls(payload) {
+  const zoneId = String((payload && payload.zoneId) || '').trim()
+  if (!zoneId) return fail('INVALID_PARAM', '缺少区域 id')
+
+  const res = await db.collection(STALLS).where({ zone_id: zoneId }).limit(300).get()
+
+  const stalls = res.data
+    .filter(function (doc) {
+      // 摊位不做物理删除，标记一下就不再显示，历史投票留着
+      return doc.is_deleted !== true
+    })
+    .sort(function (a, b) {
+      return (a.sort_order || 0) - (b.sort_order || 0)
+    })
+
+  return ok(stalls)
+}
+
+async function createStall(payload) {
+  const zoneId = String((payload && payload.zoneId) || '').trim()
+  if (!zoneId) return fail('INVALID_PARAM', '缺少区域 id')
+
+  const checked = normalizeStallInput(payload)
+  if (checked.error) return fail('INVALID_PARAM', checked.error)
+
+  const doc = Object.assign({}, checked.doc, {
+    zone_id: zoneId,
+    is_deleted: false,
+    created_at: new Date(),
+    updated_at: new Date()
+  })
+
+  const res = await db.collection(STALLS).add({ data: doc })
+  return ok({ _id: res._id })
+}
+
+async function updateStall(payload) {
+  const id = String((payload && payload._id) || '').trim()
+  if (!id) return fail('INVALID_PARAM', '缺少 _id')
+
+  const checked = normalizeStallInput(payload)
+  if (checked.error) return fail('INVALID_PARAM', checked.error)
+
+  const doc = Object.assign({}, checked.doc, { updated_at: new Date() })
+  await db.collection(STALLS).doc(id).update({ data: doc })
+  return ok({ _id: id })
+}
+
+/** 软删除：只打标记，不真删 */
+async function deleteStall(payload) {
+  const id = String((payload && payload._id) || '').trim()
+  if (!id) return fail('INVALID_PARAM', '缺少 _id')
+
+  await db
+    .collection(STALLS)
+    .doc(id)
+    .update({ data: { is_deleted: true, updated_at: new Date() } })
+
+  return ok({ _id: id })
 }
 
 /** 管理端要看到全部区域，包括已经下架的 */
@@ -354,6 +460,14 @@ exports.main = async (rawEvent) => {
         return await updateZone(event)
       case 'zones.delete':
         return await deleteZone(event)
+      case 'stalls.list':
+        return await listStalls(event)
+      case 'stalls.create':
+        return await createStall(event)
+      case 'stalls.update':
+        return await updateStall(event)
+      case 'stalls.delete':
+        return await deleteStall(event)
       case 'demo.seed':
         return await seedDemo()
       case 'demo.clear':
@@ -362,7 +476,14 @@ exports.main = async (rawEvent) => {
         return fail('INVALID_PARAM', '未知操作：' + action)
     }
   } catch (err) {
-    if (isCollectionMissing(err)) return ok([])
+    // 集合没建好时给出明确指引。注意不能一律当成"空数据"返回——
+    // 那样新建/修改动作会假报成功，用户以为存上了其实没存
+    if (isCollectionMissing(err)) {
+      return fail(
+        'COLLECTION_MISSING',
+        '数据库里缺少集合。请到云开发控制台的数据库里确认 zones、stalls 都已经建好。'
+      )
+    }
     console.error('[admin] action=' + action + ' 执行失败', err)
     return fail('INTERNAL', '服务异常，请稍后重试')
   }
