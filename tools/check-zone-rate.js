@@ -35,6 +35,30 @@ let ratings = []
 let ratingSeq = 0
 let currentOpenid = 'openid-a'
 
+// 摊位：只需要几条给 zone.stalls 用
+let stalls = [
+  {
+    _id: 's1',
+    zone_id: 'z1',
+    name_zh: '老马家烤肉',
+    name_en: 'Lao Ma BBQ',
+    price_items: [{ kind: 'addon', name_zh: '加馕', price: 3 }],
+    ne: { latitude: 34.2655, longitude: 108.9405 },
+    sw: { latitude: 34.2652, longitude: 108.9402 },
+    sort_order: 1,
+    is_deleted: false
+  },
+  {
+    _id: 's2',
+    zone_id: 'z1',
+    name_zh: '已经删掉的',
+    ne: { latitude: 34.2658, longitude: 108.9408 },
+    sw: { latitude: 34.2656, longitude: 108.9406 },
+    sort_order: 2,
+    is_deleted: true
+  }
+]
+
 function clone(value) {
   // 注意要保住 Date 对象：走 JSON 克隆会把它变成字符串，
   // 之后所有时间比较都会失效（这个坑测试里真踩过一次）。
@@ -161,7 +185,7 @@ const fakeSdk = {
     return {
       command: Object.assign({ aggregate: aggregateOps }, queryOps),
       collection: function (name) {
-        const source = name === 'zones' ? zones : ratings
+        const source = name === 'zones' ? zones : name === 'stalls' ? stalls : ratings
 
         return {
           limit: function () {
@@ -285,6 +309,27 @@ async function run() {
     '初始状态：没有推荐度，也没有我的评分',
     list0.data[0].rating.count === 0 && list0.data[0].mine === null
   ])
+
+  // 这条是回归测试：listStalls 曾经直接返回裸数组、没包成 { ok, data }，
+  // 客户端拿到就报"云函数返回格式异常"。任何 action 都必须守住这个约定。
+  const stallRes = await zoneFn.main({ action: 'stalls', zoneId: 'z1' })
+  checks.push([
+    'zone.stalls 返回的是约定的 ok/data 结构，不是裸数组',
+    stallRes && stallRes.ok === true && Array.isArray(stallRes.data)
+  ])
+
+  checks.push([
+    'zone.stalls 只返回没被软删除的摊位',
+    stallRes.data.length === 1 && stallRes.data[0]._id === 's1'
+  ])
+
+  checks.push([
+    'zone.stalls 不带 soft 删除的摊位，也不泄露 is_deleted',
+    stallRes.data[0].is_deleted === undefined
+  ])
+
+  const noZoneId = await zoneFn.main({ action: 'stalls' })
+  checks.push(['zone.stalls 缺少区域 id 时明确报错', noZoneId.ok === false && noZoneId.code === 'INVALID_PARAM'])
 
   const r1 = await zoneFn.main({ action: 'rate', zoneId: 'z1', stars: 5 })
   checks.push([

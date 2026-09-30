@@ -11,7 +11,13 @@ module.exports = {
   cardRating: '夜市推荐度',
   cardMyRating: '你的评分',
   cardStallCount: '摊点数量',
-  cardStallCountEmpty: '待接入',
+  stallCountUnit: '个',
+
+  priceUnit: ' 元',
+  stallMenuEmpty: '这个摊位还没填价目',
+  stallHintTap: '点橙色方框看摊位',
+  stallLoadFailed: '摊位读取失败',
+  stallBack: '返回夜市',
 
   ratingHintTap: '点星星打分',
   ratingHintNote: '48 小时后生效 · 可在 我的 → 我的打分 修改',

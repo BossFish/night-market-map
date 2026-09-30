@@ -11,7 +11,13 @@ module.exports = {
   cardRating: 'Market rating',
   cardMyRating: 'Your rating',
   cardStallCount: 'Stalls',
-  cardStallCountEmpty: 'Coming soon',
+  stallCountUnit: '',
+
+  priceUnit: ' CNY',
+  stallMenuEmpty: 'No price list yet',
+  stallHintTap: 'Tap an orange box for a stall',
+  stallLoadFailed: 'Could not load stalls',
+  stallBack: 'Back to market',
 
   ratingHintTap: 'Tap a star to rate',
   ratingHintNote: 'Takes effect in 48 hours · edit in Me → My ratings',

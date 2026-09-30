@@ -26,6 +26,14 @@
   style="left: {{item.x}}px; top: {{item.y}}px; animation-delay: {{item.delay}}s;"
 >⭐</view>
 
+<!-- 摊位名字：默认贴在橙色方框上方，撞了就挪到下方交错 -->
+<view
+  wx:for="{{stallLabels}}"
+  wx:key="key"
+  class="stall-label {{item.below ? 'stall-label--below' : ''}}"
+  style="left: {{item.x}}px; top: {{item.y}}px;"
+>{{item.text}}</view>
+
 <!-- 右上角入口：我的 -->
 <view class="mine" bindtap="onOpenMine">{{T.mineEntry}}</view>
 
@@ -39,6 +47,10 @@
   {{T.mapLoadFailed}}：{{loadError}} · {{T.mapRetry}}
 </view>
 
+<view class="errorbar" wx:if="{{stallError}}" bindtap="onRetryStalls">
+  {{T.stallLoadFailed}}：{{stallError}} · {{T.mapRetry}}
+</view>
+
 <!--
   区域详情卡片。
   后续阶段会把内容挂进这里：
@@ -47,11 +59,12 @@
     阶段7 区域留言
     阶段11 给开发者留言入口
 -->
-<view class="card {{cardClosing ? 'card--closing' : ''}}" wx:if="{{selectedZone}}">
+<view class="hint" wx:if="{{selectedZone && !selectedStall && stalls.length}}">{{T.stallHintTap}}</view>
+
+<view class="card {{cardClosing ? 'card--closing' : ''}} {{selectedStall ? 'card--dimmed' : ''}}" wx:if="{{selectedZone}}">
   <view class="card__handle"></view>
 
   <view class="card__title">{{selectedZone.displayName}}</view>
-  <view class="card__sub" wx:if="{{selectedZone.displayNameSub}}">{{selectedZone.displayNameSub}}</view>
 
   <view class="card__rows">
     <view class="card__row" wx:if="{{selectedZone.business_hours}}">
@@ -88,7 +101,7 @@
 
     <view class="card__row">
       <text class="card__label">{{T.cardStallCount}}</text>
-      <text class="card__value card__value--muted">{{T.cardStallCountEmpty}}</text>
+      <text class="card__value">{{selectedZone.stallCount}} {{T.stallCountUnit}}</text>
     </view>
   </view>
 
@@ -110,4 +123,33 @@
     </view>
   </view>
 
+</view>
+
+<!-- 摊位卡片：盖在夜市卡片上面，下面是价目表 -->
+<view class="card card--stall" wx:if="{{selectedStall}}">
+  <view class="card__handle"></view>
+
+  <view class="card__title">{{selectedStall.displayName}}</view>
+
+  <!--
+    价目表的三种模板在渲染上统一成"名称 + 小字 + 若干搭配"：
+    系列的价格挂在标题上（同价），单品的价格在每条搭配上，增项只有名字和价格。
+  -->
+  <view class="menu" wx:if="{{selectedStall.menu.length}}">
+    <view class="menu__block" wx:for="{{selectedStall.menu}}" wx:key="key" wx:for-item="block">
+      <view class="menu__head">
+        <text class="menu__name">{{block.name}}</text>
+        <text class="menu__price" wx:if="{{block.priceText}}">{{block.priceText}}</text>
+      </view>
+
+      <view class="menu__note" wx:if="{{block.note}}">{{block.note}}</view>
+
+      <view class="menu__option" wx:for="{{block.options}}" wx:key="key" wx:for-item="opt">
+        <text class="menu__option-name">{{opt.name}}</text>
+        <text class="menu__option-price" wx:if="{{opt.priceText}}">{{opt.priceText}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="menu__empty" wx:else>{{T.stallMenuEmpty}}</view>
 </view>

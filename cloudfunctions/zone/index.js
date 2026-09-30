@@ -23,6 +23,7 @@ const $ = db.command.aggregate
 
 const ZONES = 'zones'
 const RATINGS = 'zone_ratings'
+const STALLS = 'stalls'
 
 // 评分等多久才生效
 const PENDING_MS = 48 * 60 * 60 * 1000
@@ -231,6 +232,41 @@ async function recentZoneCount(openid) {
 
 // ---------- 各个 action ----------
 
+/**
+ * 取某个夜市里的摊位。
+ *
+ * 摊位是按实际尺寸画的小方块（几米见方），所以坐标原样返回，
+ * 前端在地图上按实际大小画橙色方框。
+ */
+async function listStalls(event) {
+  const zoneId = String((event && event.zoneId) || '').trim()
+  if (!zoneId) return fail('INVALID_PARAM', '缺少区域 id')
+
+  const res = await db.collection(STALLS).where({ zone_id: zoneId }).limit(300).get()
+
+  return ok(
+    res.data
+    .filter(function (doc) {
+      return doc.is_deleted !== true
+    })
+    .sort(function (a, b) {
+      return (a.sort_order || 0) - (b.sort_order || 0)
+    })
+    .map(function (doc) {
+      const ne = doc.ne || {}
+      const sw = doc.sw || {}
+      return {
+        _id: doc._id,
+        name_zh: doc.name_zh || '',
+        name_en: doc.name_en || '',
+        price_items: Array.isArray(doc.price_items) ? doc.price_items : [],
+        ne: { latitude: ne.latitude, longitude: ne.longitude },
+        sw: { latitude: sw.latitude, longitude: sw.longitude }
+      }
+    })
+  )
+}
+
 async function listZones(openid) {
   const res = await db.collection(ZONES).limit(200).get()
   const overview = await summarize()
@@ -402,6 +438,8 @@ exports.main = async (event) => {
     switch (action) {
       case 'list':
         return ok(await listZones(openid))
+      case 'stalls':
+        return await listStalls(event)
       case 'rate':
         if (!openid) return fail('NO_OPENID', '没有拿到用户身份')
         return await submitRating(openid, event)

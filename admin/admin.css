@@ -64,8 +64,20 @@ code {
 }
 
 .banner {
-  padding: 12px 24px;
-  font-size: 14px;
+  /* 固定居中：不管页面滚到哪、上面盖着几层弹窗，提示都看得见 */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 200;
+  min-width: 280px;
+  max-width: 80vw;
+  padding: 20px 32px;
+  transform: translate(-50%, -50%);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(16, 24, 40, 0.28);
+  font-size: 15px;
+  text-align: center;
+  cursor: pointer;
 }
 
 .banner--error {
@@ -314,6 +326,151 @@ code {
   gap: 10px;
 }
 
+/* ---------- 价目表 ---------- */
+
+.price-editor {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.price-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.price-editor__headings {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.price-editor__headings span:nth-child(1),
+.price-editor__headings span:nth-child(2) {
+  flex: 1;
+}
+
+.price-editor__headings span:nth-child(3) {
+  flex: 0 0 76px;
+}
+
+.price-editor__headings span:nth-child(4) {
+  flex: 0 0 26px;
+}
+
+.price-rows {
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.price-editor__adds {
+  display: flex;
+  gap: 6px;
+}
+
+.price-block {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #FFFFFF;
+}
+
+.price-block:last-child {
+  margin-bottom: 0;
+}
+
+.price-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.price-block__kind {
+  flex: 0 0 88px;
+  padding: 3px 6px;
+  font-size: 13px;
+}
+
+.price-block__main {
+  display: flex;
+  gap: 8px;
+}
+
+.price-block .input {
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+.price-block__main .js-name-zh,
+.price-block__main .js-name-en {
+  flex: 1;
+  min-width: 0;
+}
+
+.price-block__main .js-price {
+  flex: 0 0 70px;
+}
+
+.price-block .js-note {
+  width: 100%;
+  margin-top: 5px;
+}
+
+.price-block__remove {
+  flex: 0 0 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.price-block__remove:hover {
+  color: #991B1B;
+}
+
+.price-options {
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+
+.price-options__label {
+  margin-bottom: 5px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.price-option {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.price-option .js-opt-name-zh,
+.price-option .js-opt-name-en {
+  flex: 1;
+  min-width: 0;
+}
+
+.price-option .js-opt-price {
+  flex: 0 0 62px;
+}
+
+.price-empty {
+  padding: 10px 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
 /* ---------- 弹层 ---------- */
 
 .modal {
@@ -389,6 +546,11 @@ code {
   white-space: nowrap;
 }
 
+/* 不带上方对齐留白的勾选项（单独一行时用） */
+.field--check-flat {
+  padding-top: 0;
+}
+
 .row {
   display: flex;
   gap: 14px;
@@ -444,7 +606,7 @@ code {
 /* ---------- 编辑弹层的双栏布局：左边表单，右边地图 ---------- */
 
 .modal__box--wide {
-  width: min(1060px, calc(100vw - 48px));
+  width: min(1400px, calc(100vw - 48px));
 }
 
 .editor {
@@ -454,12 +616,13 @@ code {
 }
 
 .editor__form {
-  flex: 0 0 380px;
+  flex: 1;
+  min-width: 0;
 }
 
 .editor__map {
-  flex: 1;
-  min-width: 0;
+  /* 地图固定 500px，剩下的横向空间全留给左边的表单 */
+  flex: 0 0 500px;
 }
 
 .mapcanvas {
@@ -489,12 +652,17 @@ code {
 }
 
 /* 窗口窄的时候改成上下排列，免得地图被挤成一条 */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .editor {
     flex-direction: column;
   }
 
   .editor__form {
+    flex: none;
+    width: 100%;
+  }
+
+  .editor__map {
     flex: none;
     width: 100%;
   }

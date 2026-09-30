@@ -45,7 +45,6 @@
             <th>营业时间</th>
             <th>东北角</th>
             <th>西南角</th>
-            <th>排序</th>
             <th>状态</th>
             <th class="table__ops">操作</th>
           </tr>
@@ -88,7 +87,8 @@
 
           <div id="stallList" class="stall-list"></div>
 
-          <fieldset class="fieldset">
+          <!-- 表单默认藏起来：没点「新增摊位」、也没选中某个摊位时，填了也没用 -->
+          <fieldset id="stallForm" class="fieldset hidden">
             <legend id="stallFormLegend">摊位信息</legend>
 
             <label class="field">
@@ -99,15 +99,17 @@
               <span class="field__label">英文名称</span>
               <input id="sNameEn" class="input" type="text" placeholder="Lao Ma BBQ">
             </label>
-            <label class="field">
-              <span class="field__label">价目区间</span>
-              <input id="sPrice" class="input" type="text" placeholder="10-30 元">
-            </label>
-            <label class="field">
-              <span class="field__label">排序（数字越小越靠前）</span>
-              <input id="sSort" class="input" type="number" step="1">
-            </label>
-
+            <div class="price-editor">
+              <div class="price-editor__head">
+                <span class="field__label">价目表（单位：元）</span>
+                <span class="price-editor__adds">
+                  <button id="btnAddSingle" class="btn btn--small" type="button">+ 单品</button>
+                  <button id="btnAddSeries" class="btn btn--small" type="button">+ 系列</button>
+                  <button id="btnAddAddon" class="btn btn--small" type="button">+ 增项</button>
+                </span>
+              </div>
+              <div id="priceRows" class="price-rows"></div>
+            </div>
             <div class="row">
               <label class="field field--grow">
                 <span class="field__label">东北角纬度</span>
@@ -142,9 +144,10 @@
           <div id="stallMapContainer" class="mapcanvas"></div>
           <div id="stallMapStatus" class="mapstatus">地图加载中…</div>
           <p class="muted tips">
-            点「新增摊位」后，在地图上<b>点两下</b>框出摊位位置（先点一个角，再点斜对面那个角），
-            然后填个名字保存。<br>
-            绿色是夜市区域，橙色是已经画好的摊位。
+            点「新增摊位」后，<b>双击地图</b>开始放置：黄色框会跟着鼠标走，
+            <b>鼠标位置是摊位的右下角</b>，<b>左键点一下确定位置</b>，<b>右键旋转 90°</b>
+            （2×3 米 与 3×2 米 互换）。<br>
+            绿色是夜市区域，橙色是已保存的摊位，<b>黄色是还没保存的预览</b>。
           </p>
         </div>
 
@@ -180,16 +183,10 @@
             <input id="fHours" class="input" type="text" placeholder="18:00 - 次日 02:00">
           </label>
 
-          <div class="row">
-            <label class="field field--grow">
-              <span class="field__label">排序（数字越小越靠前）</span>
-              <input id="fSort" class="input" type="number" step="1">
-            </label>
-            <label class="field field--check">
-              <input id="fVisible" type="checkbox">
-              <span>在小程序里显示</span>
-            </label>
-          </div>
+          <label class="field field--check field--check-flat">
+            <input id="fVisible" type="checkbox">
+            <span>在小程序里显示</span>
+          </label>
 
           <fieldset class="fieldset">
             <legend>东北角（地图上偏右上）</legend>
@@ -226,8 +223,9 @@
           <div id="mapContainer" class="mapcanvas"></div>
           <div id="mapStatus" class="mapstatus">地图加载中…</div>
           <p class="muted tips">
-            <b>在地图上点两下</b>就能框出区域：先点一个角，再点斜对面那个角。
-            想调整就<b>再点两下重画</b>，或者直接改左边的数字，地图上的框会跟着动。
+            <b>双击地图</b>清空并开始框选，然后<b>点一下选右上角</b>、<b>再点一下选左下角</b>，
+            框选就完成了。想重来就再双击一次。
+            也可以直接改左边的数字，地图上的框会跟着动。
           </p>
         </div>
 

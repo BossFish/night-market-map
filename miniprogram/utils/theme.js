@@ -8,7 +8,13 @@ const theme = {
   rectFill: '#22C55E4D',
   rectFillActive: '#22C55E99',
   rectStroke: '#15803DFF',
-  rectStrokeActive: '#14532DFF'
+  rectStrokeActive: '#14532DFF',
+
+  // 摊位：橙色方框，压在绿色区域上面
+  stallFill: '#F973164D',
+  stallFillActive: '#F97316B3',
+  stallStroke: '#EA580CFF',
+  stallStrokeActive: '#9A3412FF'
 }
 
 module.exports = theme

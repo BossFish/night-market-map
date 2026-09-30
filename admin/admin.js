@@ -19,12 +19,19 @@ var state = {
 var MAP_SCRIPT_URL = 'https://map.qq.com/api/gljs?v=1.exp&key='
 var DEFAULT_CENTER = { latitude: 34.2619, longitude: 108.9421 }
 
+// 一个摊位大概就这么大。鼠标点下去的位置是摊位的右下角（东南角），
+// 右键能把这 2×3 转成 3×2。想改尺寸就改这两个数。
+var STALL_WIDTH_M = 3 // 东西方向
+var STALL_LENGTH_M = 6 // 南北方向
+
 var mapView = {
   map: null,
   polygonLayer: null,
   ready: false,
   loading: false,
-  // 点两下框区域时，先记下的第一个角
+  // 是否处于框选状态：双击地图进入
+  picking: false,
+  // 框选时先记下的第一个角（右上角）
   pendingCorner: null
 }
 
@@ -79,9 +86,8 @@ function showBanner(text, kind) {
   box.classList.remove('hidden')
 
   if (bannerTimer) clearTimeout(bannerTimer)
-  if (kind === 'ok') {
-    bannerTimer = setTimeout(hideBanner, 2500)
-  }
+  // 成功提示一闪而过；出错的留久一点，但也别一直挡着界面，点一下能立刻关掉
+  bannerTimer = setTimeout(hideBanner, kind === 'ok' ? 2000 : 6000)
 }
 
 function hideBanner() {
@@ -167,7 +173,7 @@ function loadZones() {
 function emptyRow(text) {
   var tr = document.createElement('tr')
   var td = document.createElement('td')
-  td.colSpan = 7
+  td.colSpan = 6
   td.className = 'empty'
   td.textContent = text
   tr.appendChild(td)
@@ -233,8 +239,6 @@ function buildRow(zone) {
   tr.appendChild(textCell(zone.business_hours || '—'))
   tr.appendChild(coordCell(zone.ne))
   tr.appendChild(coordCell(zone.sw))
-  tr.appendChild(textCell(String(zone.sort_order == null ? 0 : zone.sort_order)))
-
   var statusTd = document.createElement('td')
   var tag = document.createElement('span')
   tag.className = 'tag ' + (visible ? 'tag--on' : 'tag--off')
@@ -264,7 +268,6 @@ function openEditor(zone) {
   el('fNameZh').value = zone ? zone.name_zh || '' : ''
   el('fNameEn').value = zone ? zone.name_en || '' : ''
   el('fHours').value = zone ? zone.business_hours || '' : ''
-  el('fSort').value = zone ? (zone.sort_order == null ? 0 : zone.sort_order) : state.zones.length + 1
   el('fVisible').checked = zone ? zone.is_visible !== false : true
 
   var ne = (zone && zone.ne) || {}
@@ -302,7 +305,6 @@ function collectForm() {
     name_zh: el('fNameZh').value.trim(),
     name_en: el('fNameEn').value.trim(),
     business_hours: el('fHours').value.trim(),
-    sort_order: Number(el('fSort').value) || 0,
     is_visible: el('fVisible').checked,
     ne: {
       latitude: Number(el('fNeLat').value),
@@ -429,7 +431,6 @@ function zoneToPayload(zone, overrides) {
       name_zh: zone.name_zh,
       name_en: zone.name_en,
       business_hours: zone.business_hours,
-      sort_order: zone.sort_order,
       is_visible: zone.is_visible !== false,
       ne: zone.ne,
       sw: zone.sw
@@ -567,6 +568,41 @@ function lngOf(pos) {
   return NaN
 }
 
+/**
+ * 把地图的点击区分成单击和双击。
+ *
+ * 地图只会说"被点了"，不区分单击双击，而双击本身也是两次单击，
+ * 所以这里用一个短延时兜一下：250 毫秒内来了第二下就当双击，
+ * 同时把第一下压住不处理。
+ *
+ * 回调收到的 point 是 { latitude, longitude }；双击时传 null。
+ */
+function makeClickGate(handler) {
+  var timer = null
+
+  return function (evt) {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+      handler(null)
+      return
+    }
+
+    var pos = (evt && (evt.latLng || evt.latLngs)) || null
+    if (Array.isArray(pos)) pos = pos[0]
+
+    var lat = latOf(pos)
+    var lng = lngOf(pos)
+    if (!isFinite(lat) || !isFinite(lng)) return
+
+    var point = { latitude: lat, longitude: lng }
+    timer = setTimeout(function () {
+      timer = null
+      handler(point)
+    }, 250)
+  }
+}
+
 function openMapForZone(zone) {
   if (mapView.ready) {
     focusMapOnZone(zone)
@@ -585,7 +621,7 @@ function openMapForZone(zone) {
         createMap()
         mapView.ready = true
         mapView.loading = false
-        setMapStatus('地图就绪。在地图上点两下就能框出区域。', 'ok')
+        setMapStatus('地图就绪。双击地图开始框选，然后点一下选右上角、再点一下选左下角。', 'ok')
         focusMapOnZone(zone)
         syncMapFromForm()
       })
@@ -604,7 +640,7 @@ function createMap() {
     rotation: 0
   })
 
-  mapView.map.on('click', onMapClick)
+  mapView.map.on('click', makeClickGate(onZoneMapClick))
 
   mapView.polygonLayer = new TMap.MultiPolygon({
     map: mapView.map,
@@ -686,45 +722,64 @@ function syncMapFromForm() {
 }
 
 /** 在地图上点两下框出区域：第一下是一个角，第二下是斜对面那个角 */
-function onMapClick(evt) {
+/**
+ * 地图点击。point 为 null 表示双击。
+ *
+ * 交互约定（和用户对齐过）：
+ *   双击       → 清空坐标，进入框选状态
+ *   单击第一下  → 选右上角
+ *   单击第二下  → 选左下角，框选完成
+ *   再双击      → 重来
+ */
+function onZoneMapClick(point) {
   if (!mapView.ready) return
 
-  var pos = (evt && (evt.latLng || evt.latLngs)) || null
-  if (Array.isArray(pos)) pos = pos[0]
+  if (!point) {
+    mapView.pendingCorner = null
+    mapView.picking = true
+    el('fNeLat').value = ''
+    el('fNeLng').value = ''
+    el('fSwLat').value = ''
+    el('fSwLng').value = ''
+    updateSizeHint()
+    syncMapFromForm()
+    setMapStatus('已清空。点一下地图选右上角。', 'ok')
+    return
+  }
 
-  var lat = latOf(pos)
-  var lng = lngOf(pos)
-
-  if (!isFinite(lat) || !isFinite(lng)) {
-    setMapStatus('点到了，但没能读出经纬度。用点两下的方式重画，或者直接手填坐标。', 'error')
+  if (!mapView.picking) {
+    setMapStatus('想重新框选，先在地图上双击。', '')
     return
   }
 
   if (!mapView.pendingCorner) {
-    mapView.pendingCorner = { latitude: lat, longitude: lng }
-    setMapStatus('已记住第一个角。再点一下斜对面那个角，区域就框出来了。', 'ok')
+    mapView.pendingCorner = point
+    el('fNeLat').value = String(round6(point.latitude))
+    el('fNeLng').value = String(round6(point.longitude))
+    updateSizeHint()
+    syncMapFromForm()
+    setMapStatus('右上角已选。再点一下地图选左下角。', 'ok')
     return
   }
 
   var first = mapView.pendingCorner
-  var second = { latitude: lat, longitude: lng }
   mapView.pendingCorner = null
+  mapView.picking = false
 
-  // 不管先点哪两个角，都换算成东北角 + 西南角
   fillCoordInputs(
     {
-      latitude: Math.max(first.latitude, second.latitude),
-      longitude: Math.max(first.longitude, second.longitude)
+      latitude: Math.max(first.latitude, point.latitude),
+      longitude: Math.max(first.longitude, point.longitude)
     },
     {
-      latitude: Math.min(first.latitude, second.latitude),
-      longitude: Math.min(first.longitude, second.longitude)
+      latitude: Math.min(first.latitude, point.latitude),
+      longitude: Math.min(first.longitude, point.longitude)
     }
   )
 
   updateSizeHint()
   syncMapFromForm()
-  setMapStatus('区域已框出。再点两下可以重画，也可以直接改左边的数字。', 'ok')
+  setMapStatus('框好了。想重来就再双击地图。', 'ok')
 }
 
 function fillCoordInputs(ne, sw) {
@@ -754,9 +809,17 @@ var stallView = {
   zone: null,
   stalls: [],
   selectedId: '',
-  // 点两下画摊位时先记下的第一个角
-  pendingCorner: null,
-  drawing: false
+  // 价目表：界面上是若干行输入框，这里存对应的数据
+  priceItems: [],
+  // 是否处于"鼠标跟着走、等着落点"的放置状态：双击地图进入
+  placing: false,
+  // 右键旋转过没有（2×3 转成 3×2）
+  rotated: false,
+  // 最近一次鼠标位置，旋转时用它重算
+  anchor: null,
+  // 黄色的预览框，来自鼠标位置或者表单里的坐标
+  draftNe: null,
+  draftSw: null
 }
 
 function setStallStatus(text, kind) {
@@ -790,7 +853,14 @@ function ensureStallMap() {
         rotation: 0
       })
 
-      stallView.map.on('click', onStallMapClick)
+      stallView.map.on('click', makeClickGate(onStallMapClick))
+      stallView.map.on('mousemove', onStallMapMove)
+      stallView.map.on('rightclick', onStallMapRightClick)
+
+      // 放置摊位时要用右键旋转，得先把浏览器自己的右键菜单挡掉
+      el('stallMapContainer').addEventListener('contextmenu', function (e) {
+        if (stallView.placing) e.preventDefault()
+      })
 
       stallView.polygonLayer = new TMap.MultiPolygon({
         map: stallView.map,
@@ -809,6 +879,12 @@ function ensureStallMap() {
             color: 'rgba(249, 115, 22, 0.58)',
             borderColor: '#C2410C',
             borderWidth: 3
+          }),
+          // 黄色：还没保存的预览框
+          draft: new TMap.PolygonStyle({
+            color: 'rgba(250, 204, 21, 0.40)',
+            borderColor: '#CA8A04',
+            borderWidth: 2
           })
         },
         geometries: []
@@ -838,8 +914,9 @@ function focusStallMap() {
       (zone.ne.longitude + zone.sw.longitude) / 2
     )
   )
-  // 17 级大概能看到五百米宽，正好放下一个夜市区域
-  stallView.map.setZoom(17)
+  // 摊位是按实际尺寸画的（几米见方），17 级时只有几个像素宽，根本看不见。
+  // 19 级差不多一米一像素，摊位才有个能看清的大小。想看得远就滚轮缩出去。
+  stallView.map.setZoom(19)
 }
 
 function drawStallShapes() {
@@ -864,18 +941,31 @@ function drawStallShapes() {
     })
   })
 
+  // 黄色的预览框：正在放置时来自鼠标位置，否则来自表单里填的坐标
+  if (stallView.draftNe && stallView.draftSw) {
+    geometries.push({
+      id: 'draft',
+      styleId: 'draft',
+      paths: [tmapRectPath(stallView.draftNe, stallView.draftSw)]
+    })
+  }
+
   stallView.polygonLayer.setGeometries(geometries)
 }
 
 function openStallEditor(zone) {
   stallView.zone = zone
   stallView.selectedId = ''
-  stallView.pendingCorner = null
-  stallView.drawing = false
+  stallView.placing = false
+  stallView.rotated = false
+  stallView.anchor = null
+  stallView.draftNe = null
+  stallView.draftSw = null
   stallView.stalls = []
 
   el('stallZoneName').textContent = zone.name_zh || ''
   fillStallForm(null)
+  showStallForm(false)
   renderStallList()
   el('stallEditor').classList.remove('hidden')
 
@@ -885,6 +975,7 @@ function openStallEditor(zone) {
       .then(function () {
         focusStallMap()
         drawStallShapes()
+        setStallStatus('双击地图可以放置摊位位置。橙色是已保存的，黄色是正在放置的。', 'ok')
       })
       .catch(function (err) {
         setStallStatus('地图没能加载：' + err.message + '。摊位列表仍然能编辑，只是没法在地图上画框。', 'error')
@@ -899,8 +990,9 @@ function closeStallEditor() {
   el('stallEditor').classList.add('hidden')
   stallView.zone = null
   stallView.selectedId = ''
-  stallView.pendingCorner = null
-  stallView.drawing = false
+  stallView.placing = false
+  stallView.draftNe = null
+  stallView.draftSw = null
   stallView.stalls = []
 }
 
@@ -941,10 +1033,11 @@ function renderStallList() {
     name.textContent = stall.name_zh || '（未命名）'
     item.appendChild(name)
 
-    if (stall.price_range) {
+    var summary = priceSummary(stall.price_items)
+    if (summary) {
       var price = document.createElement('span')
       price.className = 'stall-list__price'
-      price.textContent = stall.price_range
+      price.textContent = summary
       item.appendChild(price)
     }
 
@@ -956,37 +1049,343 @@ function renderStallList() {
   })
 }
 
+/** 价目表在列表里只显示一个价格区间，省地方 */
+function priceSummary(items) {
+  if (!Array.isArray(items) || !items.length) return ''
+
+  var prices = items
+    .map(function (item) {
+      return Number(item.price)
+    })
+    .filter(function (value) {
+      return isFinite(value)
+    })
+
+  if (!prices.length) return ''
+
+  var min = Math.min.apply(null, prices)
+  var max = Math.max.apply(null, prices)
+  return min === max ? min + ' 元' : min + '-' + max + ' 元'
+}
+
 function selectStall(stall) {
   stallView.selectedId = stall._id
-  stallView.pendingCorner = null
-  stallView.drawing = false
+  stallView.placing = false
 
   fillStallForm(stall)
+  showStallForm(true)
   renderStallList()
   drawStallShapes()
-  setStallStatus('正在编辑「' + (stall.name_zh || '') + '」。改完记得点保存。', 'ok')
+  setStallStatus('正在编辑「' + (stall.name_zh || '') + '」。双击地图可以重新框选位置，改完记得保存。', 'ok')
 }
 
 function startNewStall() {
+  // 填了一半又点新增，先问一声，别把内容弄丢了
+  var hasDraft = el('sNameZh').value.trim() && !stallView.selectedId
+  if (hasDraft && !window.confirm('当前填的内容还没保存，确定要重新开始吗？')) return
+
   stallView.selectedId = ''
-  stallView.pendingCorner = null
-  stallView.drawing = true
+  stallView.placing = false
+  stallView.rotated = false
+  stallView.anchor = null
+  stallView.draftNe = null
+  stallView.draftSw = null
+  // 清掉旧的坐标，免得双击放置前的预览框停在上一处
+  el('sNeLat').value = ''
+  el('sNeLng').value = ''
+  el('sSwLat').value = ''
+  el('sSwLng').value = ''
 
   fillStallForm(null)
+  showStallForm(true)
   renderStallList()
   drawStallShapes()
-  setStallStatus('在地图上点两下框出摊位位置：先点一个角，再点斜对面那个角。', 'ok')
+  el('sNameZh').focus()
+  setStallStatus('双击地图开始放置：黄框跟着鼠标走，左键确定，右键旋转。', 'ok')
+}
+
+function showStallForm(show) {
+  el('stallForm').classList.toggle('hidden', !show)
+}
+
+// ---------- 价目表 ----------
+//
+// 三种模板，可以混用（真实摊子经常既有系列又有增项）：
+//   单品 一个菜一个价，可以带若干"搭配"，每种搭配单独标价
+//   系列 一个烹饪系列一个统一价，系列下可选几种搭配，不单独标价
+//   增项 加配菜之类的，每种单独一个价
+
+var PRICE_KIND_LABELS = [
+  { value: 'single', label: '单品' },
+  { value: 'series', label: '系列' },
+  { value: 'addon', label: '增项' }
+]
+
+function makeInput(className, placeholder, value) {
+  var input = document.createElement('input')
+  input.className = 'input ' + className
+  input.type = 'text'
+  input.placeholder = placeholder
+  input.value = value === 0 || value ? String(value) : ''
+  return input
+}
+
+function namePlaceholder(kind) {
+  if (kind === 'series') return '蛋炒系列'
+  if (kind === 'addon') return '加香肠'
+  return '凉皮'
+}
+
+function renderPriceRows() {
+  var box = el('priceRows')
+  box.innerHTML = ''
+
+  if (!stallView.priceItems.length) {
+    var empty = document.createElement('div')
+    empty.className = 'price-empty'
+    empty.textContent = '还没有价目。上面三个按钮对应三种模板。'
+    box.appendChild(empty)
+    return
+  }
+
+  stallView.priceItems.forEach(function (item, index) {
+    box.appendChild(buildPriceBlock(item, index))
+  })
+}
+
+function buildPriceBlock(item, index) {
+  var kind = item.kind || 'single'
+
+  var block = document.createElement('div')
+  block.className = 'price-block'
+
+  var head = document.createElement('div')
+  head.className = 'price-block__head'
+
+  var select = document.createElement('select')
+  select.className = 'input price-block__kind js-kind'
+  PRICE_KIND_LABELS.forEach(function (option) {
+    var node = document.createElement('option')
+    node.value = option.value
+    node.textContent = option.label
+    if (option.value === kind) node.selected = true
+    select.appendChild(node)
+  })
+  select.addEventListener('change', function () {
+    readPriceRows()
+    stallView.priceItems[index].kind = select.value
+    // 换类型要重画：搭配那段显示不显示、要不要标价都不一样
+    renderPriceRows()
+    updateStallSizeHint()
+  })
+  head.appendChild(select)
+
+  var remove = document.createElement('button')
+  remove.className = 'price-block__remove'
+  remove.type = 'button'
+  remove.textContent = '×'
+  remove.title = '删掉这一条'
+  remove.addEventListener('click', function () {
+    readPriceRows()
+    stallView.priceItems.splice(index, 1)
+    renderPriceRows()
+    updateStallSizeHint()
+  })
+  head.appendChild(remove)
+  block.appendChild(head)
+
+  var main = document.createElement('div')
+  main.className = 'price-block__main'
+  main.appendChild(makeInput('js-name-zh', namePlaceholder(kind), item.name_zh))
+  main.appendChild(makeInput('js-name-en', '拼音或英文', item.name_en))
+  // 单品没有统一价，价格全在搭配上
+  if (kind !== 'single') {
+    main.appendChild(makeInput('js-price', kind === 'series' ? '统一价' : '价格', item.price))
+  }
+  block.appendChild(main)
+
+  // 增项只是加个配菜，不需要小字说明
+  if (kind !== 'addon') {
+    block.appendChild(makeInput('js-note', '小字：烹饪方式、主要食材', item.note_zh))
+  }
+
+  if (kind !== 'addon') {
+    block.appendChild(buildOptions(item.options || [], kind, index))
+  }
+
+  return block
+}
+
+function buildOptions(options, kind, blockIndex) {
+  var wrap = document.createElement('div')
+  wrap.className = 'price-options'
+
+  var label = document.createElement('div')
+  label.className = 'price-options__label'
+  label.textContent =
+    kind === 'series' ? '这个系列可以选的（价格用上面的统一价）' : '搭配（每种单独标价）'
+  wrap.appendChild(label)
+
+  options.forEach(function (option, optionIndex) {
+    var row = document.createElement('div')
+    row.className = 'price-option js-option'
+    row.appendChild(
+      makeInput('js-opt-name-zh', kind === 'series' ? '炒饼' : '加肉', option.name_zh)
+    )
+    row.appendChild(makeInput('js-opt-name-en', '拼音或英文', option.name_en))
+    if (kind === 'single') {
+      row.appendChild(makeInput('js-opt-price', '价格', option.price))
+    }
+
+    var remove = document.createElement('button')
+    remove.className = 'price-block__remove'
+    remove.type = 'button'
+    remove.textContent = '×'
+    remove.title = '删掉这个搭配'
+    remove.addEventListener('click', function () {
+      readPriceRows()
+      stallView.priceItems[blockIndex].options.splice(optionIndex, 1)
+      renderPriceRows()
+      updateStallSizeHint()
+    })
+    row.appendChild(remove)
+
+    wrap.appendChild(row)
+  })
+
+  var add = document.createElement('button')
+  add.className = 'btn btn--small'
+  add.type = 'button'
+  add.textContent = '+ 搭配'
+  add.addEventListener('click', function () {
+    readPriceRows()
+    stallView.priceItems[blockIndex].options.push({ name_zh: '', name_en: '', price: '' })
+    renderPriceRows()
+    updateStallSizeHint()
+  })
+  wrap.appendChild(add)
+
+  return wrap
+}
+
+/** 把界面上填的价目读回内存。删条目、加条目、保存之前都要先调一次 */
+function readPriceRows() {
+  var blocks = el('priceRows').querySelectorAll('.price-block')
+  var items = []
+
+  for (var i = 0; i < blocks.length; i++) {
+    var block = blocks[i]
+    var options = []
+    var optionRows = block.querySelectorAll('.js-option')
+
+    for (var j = 0; j < optionRows.length; j++) {
+      var optionRow = optionRows[j]
+      var option = {
+        name_zh: optionRow.querySelector('.js-opt-name-zh').value.trim(),
+        name_en: optionRow.querySelector('.js-opt-name-en').value.trim()
+      }
+      var optionPrice = optionRow.querySelector('.js-opt-price')
+      if (optionPrice) option.price = optionPrice.value.trim()
+      options.push(option)
+    }
+
+    var priceEl = block.querySelector('.js-price')
+    var noteEl = block.querySelector('.js-note')
+
+    items.push({
+      kind: block.querySelector('.js-kind').value,
+      name_zh: block.querySelector('.js-name-zh').value.trim(),
+      name_en: block.querySelector('.js-name-en').value.trim(),
+      price: priceEl ? priceEl.value.trim() : '',
+      note_zh: noteEl ? noteEl.value.trim() : '',
+      options: options
+    })
+  }
+
+  stallView.priceItems = items
+  return items
+}
+
+function addPriceBlock(kind) {
+  readPriceRows()
+  stallView.priceItems.push({
+    kind: kind,
+    name_zh: '',
+    name_en: '',
+    price: '',
+    note_zh: '',
+    options: kind === 'addon' ? [] : [{ name_zh: '', name_en: '', price: '' }]
+  })
+  renderPriceRows()
+
+  var blocks = el('priceRows').querySelectorAll('.price-block')
+  var last = blocks[blocks.length - 1]
+  if (last) last.querySelector('.js-name-zh').focus()
+}
+
+function isGoodPrice(text) {
+  var value = Number(text)
+  return !!text && isFinite(value) && value >= 0
+}
+
+/**
+ * 检查价目表。整条空着的会跳过，填了名字却没填对价格的会报错——
+ * 那种情况一般是填漏了，静默丢掉比报错更糟。
+ */
+function validatePriceItems(items) {
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i]
+    var options = item.options || []
+    var hasOptions = options.some(function (option) {
+      return option.name_zh || option.name_en || option.price
+    })
+
+    if (!item.name_zh && !item.name_en && !item.price && !item.note_zh && !hasOptions) continue
+    if (!item.name_zh) return '价目表第 ' + (i + 1) + ' 条没填名称'
+
+    // 单品不设统一价，所以只检查系列和增项
+    if (item.kind !== 'single' && !isGoodPrice(item.price)) {
+      return '价目表第 ' + (i + 1) + ' 条的价格不是有效数字'
+    }
+
+    if (item.kind === 'single') {
+      for (var j = 0; j < options.length; j++) {
+        var option = options[j]
+        if (!option.name_zh && !option.name_en && !option.price) continue
+        if (!option.name_zh) return '价目表第 ' + (i + 1) + ' 条的搭配没填名字'
+        if (!isGoodPrice(option.price)) {
+          return '价目表第 ' + (i + 1) + ' 条的搭配「' + option.name_zh + '」没填对价格'
+        }
+      }
+    }
+  }
+  return ''
 }
 
 function fillStallForm(stall) {
   el('sNameZh').value = stall ? stall.name_zh || '' : ''
   el('sNameEn').value = stall ? stall.name_en || '' : ''
-  el('sPrice').value = stall ? stall.price_range || '' : ''
-  el('sSort').value = stall
-    ? stall.sort_order == null
-      ? 0
-      : stall.sort_order
-    : stallView.stalls.length + 1
+  var items = (stall && Array.isArray(stall.price_items) ? stall.price_items : []).map(function (item) {
+    return {
+      kind: item.kind || 'single',
+      name_zh: item.name_zh || '',
+      name_en: item.name_en || '',
+      price: item.price === 0 || item.price ? String(item.price) : '',
+      note_zh: item.note_zh || '',
+      options: (Array.isArray(item.options) ? item.options : []).map(function (option) {
+        return {
+          name_zh: option.name_zh || '',
+          name_en: option.name_en || '',
+          price: option.price === 0 || option.price ? String(option.price) : ''
+        }
+      })
+    }
+  })
+  // 新建时先给一条空白的单品
+  stallView.priceItems = items.length
+    ? items
+    : [{ kind: 'single', name_zh: '', name_en: '', price: '', note_zh: '', options: [] }]
+  renderPriceRows()
 
   var ne = (stall && stall.ne) || {}
   var sw = (stall && stall.sw) || {}
@@ -1030,12 +1429,17 @@ function evaluateStallForm() {
     return { error: '东北角的经度必须大于西南角的经度，现在是反的' }
   }
 
+  var priceItems = readPriceRows()
+  var priceError = validatePriceItems(priceItems)
+  if (priceError) return { error: priceError }
+
   return {
     payload: {
       name_zh: nameZh,
       name_en: el('sNameEn').value.trim(),
-      price_range: el('sPrice').value.trim(),
-      sort_order: Number(el('sSort').value) || 0,
+      price_items: priceItems.filter(function (item) {
+        return item.name_zh || item.name_en || item.price
+      }),
       ne: ne,
       sw: sw
     },
@@ -1044,6 +1448,9 @@ function evaluateStallForm() {
 }
 
 function updateStallSizeHint() {
+  refreshDraft()
+  drawStallShapes()
+
   var box = el('stallSizeHint')
   var result = evaluateStallForm()
 
@@ -1058,8 +1465,101 @@ function updateStallSizeHint() {
     '摊位尺寸：东西约 ' + result.size.width + ' 米，南北约 ' + result.size.height + ' 米'
 }
 
-function onStallMapClick(evt) {
-  if (!stallView.drawing) return
+// ---------- 摊位位置的放置 ----------
+
+function metersToLatDegrees(meters) {
+  return meters / 111320
+}
+
+function metersToLngDegrees(meters, latitude) {
+  return meters / (111320 * Math.cos((latitude * Math.PI) / 180))
+}
+
+/**
+ * 由鼠标位置算出摊位矩形。
+ *
+ * 约定：鼠标位置是摊位的**右下角**（东南角）。
+ * 没旋转时东西 2 米、南北 3 米；旋转后两者互换。
+ */
+function rectFromAnchor(anchor, rotated) {
+  var widthM = rotated ? STALL_LENGTH_M : STALL_WIDTH_M
+  var heightM = rotated ? STALL_WIDTH_M : STALL_LENGTH_M
+
+  var south = anchor.latitude
+  var east = anchor.longitude
+
+  return {
+    ne: {
+      latitude: south + metersToLatDegrees(heightM),
+      longitude: east
+    },
+    sw: {
+      latitude: south,
+      longitude: east - metersToLngDegrees(widthM, south)
+    }
+  }
+}
+
+/** 只判断表单里的四个坐标能不能画出一个矩形，不管名称和价目 */
+function coordinatesOfStallForm() {
+  var fields = ['sNeLat', 'sNeLng', 'sSwLat', 'sSwLng']
+  var values = {}
+
+  for (var i = 0; i < fields.length; i++) {
+    var raw = el(fields[i]).value.trim()
+    var num = Number(raw)
+    if (!raw || !isFinite(num)) return null
+    values[fields[i]] = num
+  }
+
+  var ne = { latitude: values.sNeLat, longitude: values.sNeLng }
+  var sw = { latitude: values.sSwLat, longitude: values.sSwLng }
+
+  if (ne.latitude <= sw.latitude || ne.longitude <= sw.longitude) return null
+  return { ne: ne, sw: sw }
+}
+
+/** 不在放置状态时，预览框跟着表单里的坐标走 */
+function refreshDraft() {
+  if (stallView.placing) return
+
+  var coords = coordinatesOfStallForm()
+  stallView.draftNe = coords ? coords.ne : null
+  stallView.draftSw = coords ? coords.sw : null
+}
+
+function startPlacing() {
+  stallView.placing = true
+  stallView.rotated = false
+  stallView.anchor = null
+  stallView.draftNe = null
+  stallView.draftSw = null
+  drawStallShapes()
+  setStallStatus('移动鼠标选位置（鼠标是摊位的右下角），左键点一下确定，右键旋转 90°。', 'ok')
+}
+
+function confirmPlacement(point) {
+  stallView.placing = false
+  stallView.anchor = point
+
+  var rect = rectFromAnchor(point, stallView.rotated)
+  stallView.draftNe = rect.ne
+  stallView.draftSw = rect.sw
+
+  el('sNeLat').value = String(round6(rect.ne.latitude))
+  el('sNeLng').value = String(round6(rect.ne.longitude))
+  el('sSwLat').value = String(round6(rect.sw.latitude))
+  el('sSwLng').value = String(round6(rect.sw.longitude))
+
+  updateStallSizeHint()
+  drawStallShapes()
+  el('sNameZh').focus()
+  setStallStatus('位置已放好（黄色框就是它）。填上名称和价目再保存，想挪位置就再双击地图。', 'ok')
+}
+
+/** 鼠标在动时，黄框跟着走 */
+function onStallMapMove(evt) {
+  if (!stallView.placing) return
 
   var pos = (evt && (evt.latLng || evt.latLngs)) || null
   if (Array.isArray(pos)) pos = pos[0]
@@ -1068,25 +1568,61 @@ function onStallMapClick(evt) {
   var lng = lngOf(pos)
   if (!isFinite(lat) || !isFinite(lng)) return
 
-  if (!stallView.pendingCorner) {
-    stallView.pendingCorner = { latitude: lat, longitude: lng }
-    setStallStatus('已记住第一个角。再点一下斜对面那个角。', 'ok')
+  stallView.anchor = { latitude: lat, longitude: lng }
+
+  var rect = rectFromAnchor(stallView.anchor, stallView.rotated)
+  stallView.draftNe = rect.ne
+  stallView.draftSw = rect.sw
+  drawStallShapes()
+}
+
+/** 右键把摊位转 90 度 */
+function onStallMapRightClick() {
+  if (!stallView.placing) return
+
+  stallView.rotated = !stallView.rotated
+
+  if (stallView.anchor) {
+    var rect = rectFromAnchor(stallView.anchor, stallView.rotated)
+    stallView.draftNe = rect.ne
+    stallView.draftSw = rect.sw
+    drawStallShapes()
+  }
+
+  setStallStatus(
+    stallView.rotated
+      ? '已旋转：东西 3 米 × 南北 2 米。左键确定位置。'
+      : '已旋转：东西 2 米 × 南北 3 米。左键确定位置。',
+    'ok'
+  )
+}
+
+/**
+ * 摊位地图的点击。point 为 null 表示双击。
+ *
+ * 交互约定：
+ *   双击       → 进入放置状态，黄框跟着鼠标走
+ *   左键点一下  → 确定位置
+ *   右键       → 旋转 90°
+ */
+function onStallMapClick(point) {
+  if (!stallView.ready) return
+
+  if (!point) {
+    if (el('stallForm').classList.contains('hidden')) {
+      setStallStatus('先点「新增摊位」，或者从左边选一个摊位，才能放位置。', '')
+      return
+    }
+    startPlacing()
     return
   }
 
-  var first = stallView.pendingCorner
-  var second = { latitude: lat, longitude: lng }
-  stallView.pendingCorner = null
-  stallView.drawing = false
+  if (stallView.placing) {
+    confirmPlacement(point)
+    return
+  }
 
-  el('sNeLat').value = String(round6(Math.max(first.latitude, second.latitude)))
-  el('sNeLng').value = String(round6(Math.max(first.longitude, second.longitude)))
-  el('sSwLat').value = String(round6(Math.min(first.latitude, second.latitude)))
-  el('sSwLng').value = String(round6(Math.min(first.longitude, second.longitude)))
-
-  updateStallSizeHint()
-  el('sNameZh').focus()
-  setStallStatus('框好了。填个摊位名称，然后点保存。', 'ok')
+  setStallStatus('要挪摊位位置，先在地图上双击。', '')
 }
 
 function saveStall() {
@@ -1152,6 +1688,8 @@ function removeStall() {
 // ---------- 启动 ----------
 
 function bindEvents() {
+  el('banner').addEventListener('click', hideBanner)
+
   el('btnLogin').addEventListener('click', doLogin)
   el('keyInput').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') doLogin()
@@ -1170,6 +1708,9 @@ function bindEvents() {
   })
 
   el('btnNewStall').addEventListener('click', startNewStall)
+  el('btnAddSingle').addEventListener('click', function () { addPriceBlock('single') })
+  el('btnAddSeries').addEventListener('click', function () { addPriceBlock('series') })
+  el('btnAddAddon').addEventListener('click', function () { addPriceBlock('addon') })
   el('btnSaveStall').addEventListener('click', saveStall)
   el('btnDeleteStall').addEventListener('click', removeStall)
   el('btnCloseStall').addEventListener('click', closeStallEditor)

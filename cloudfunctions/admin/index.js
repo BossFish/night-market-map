@@ -159,21 +159,130 @@ function normalizeZoneInput(payload) {
       business_hours: String(p.business_hours || '').trim(),
       ne: rect.ne,
       sw: rect.sw,
-      sort_order: Number(p.sort_order) || 0,
       is_visible: p.is_visible !== false
     }
   }
 }
 
+/**
+ * 给新建的记录排一个顺序号。
+ *
+ * 排序字段还在数据库里（列表要靠它稳定排序），但后台不让填了——
+ * 新增时自动取现有最大值加一，相当于"按添加的先后排"。
+ */
+async function nextSortOrder(collectionName) {
+  const res = await db.collection(collectionName).limit(300).get()
+
+  let max = 0
+  res.data.forEach(function (doc) {
+    const value = Number(doc.sort_order) || 0
+    if (value > max) max = value
+  })
+  return max + 1
+}
+
 // ---------- 摊位 ----------
 
 /**
- * 校验并整理摊位数据。
+ * 整理价目表。
  *
- * price_range 目前是后台手填的一段文字（例如「10-30 元」）。
- * 如果以后改成"用户投票、系统算均价"，这一项换成看价格投票集合即可，
- * 摊位的其余结构不用动。
+ * 每一项是 { name_zh, name_en, price }，price 单位是元。
+ * 整行都空着的会被跳过（表单里刚加还没填的那一行），
+ * 但填了名字却没填对价格的会明确报错——那种情况通常是填漏了，静默丢掉反而糟。
  */
+// 价目表的三种条目类型：
+//   single 单品   —— 一个菜一个价，可以带若干"搭配"，每种搭配单独标价
+//   series 系列   —— 一个烹饪系列一个统一价，系列下可选几种搭配（不单独标价）
+//   addon  增项   —— 加配菜之类的，每种单独一个价
+const PRICE_KINDS = ['single', 'series', 'addon']
+
+function round2(value) {
+  return Math.round(value * 100) / 100
+}
+
+function textOf(value) {
+  return value === null || value === undefined ? '' : String(value).trim()
+}
+
+function parsePrice(text) {
+  const value = Number(text)
+  if (!text || !isFinite(value) || value < 0) return null
+  return round2(value)
+}
+
+/** 搭配列表。单品模式下每一项要单独标价，系列模式下不用 */
+function normalizePriceOptions(raw, kind) {
+  const list = Array.isArray(raw) ? raw : []
+  const out = []
+
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i] || {}
+    const nameZh = textOf(item.name_zh)
+    const nameEn = textOf(item.name_en)
+    const priceText = textOf(item.price)
+
+    if (!nameZh && !nameEn && !priceText) continue
+    if (!nameZh) return { error: '第 ' + (i + 1) + ' 个搭配没填名字' }
+
+    const option = { name_zh: nameZh, name_en: nameEn }
+
+    if (kind === 'single') {
+      const price = parsePrice(priceText)
+      if (price === null) return { error: '第 ' + (i + 1) + ' 个搭配的价格不是有效数字' }
+      option.price = price
+    }
+
+    out.push(option)
+  }
+
+  return { options: out }
+}
+
+function normalizePriceItems(raw) {
+  const list = Array.isArray(raw) ? raw : []
+  const out = []
+
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i] || {}
+    const kind = PRICE_KINDS.indexOf(item.kind) >= 0 ? item.kind : 'single'
+
+    const nameZh = textOf(item.name_zh)
+    const nameEn = textOf(item.name_en)
+    const priceText = textOf(item.price)
+    // 小字：烹饪方式、用了什么食材。暂时只收中文，
+    // 等做英文那一轮再加 note_en，结构不用改
+    const noteZh = textOf(item.note_zh)
+    const hasOptions = Array.isArray(item.options) && item.options.length > 0
+
+    // 整条空着就跳过（表单里刚加还没填的那种）
+    if (!nameZh && !nameEn && !priceText && !noteZh && !hasOptions) continue
+    if (!nameZh) return { error: '价目表第 ' + (i + 1) + ' 条没填名称' }
+
+    const entry = { kind: kind, name_zh: nameZh, name_en: nameEn }
+
+    // 增项只是加个配菜，不需要小字说明
+    if (kind !== 'addon') entry.note_zh = noteZh
+
+    // 单品不设统一价，价格全在搭配上；系列和增项才有自己的价格
+    if (kind !== 'single') {
+      const price = parsePrice(priceText)
+      if (price === null) return { error: '价目表第 ' + (i + 1) + ' 条的价格不是有效数字' }
+      entry.price = price
+    }
+
+    if (kind !== 'addon') {
+      const options = normalizePriceOptions(item.options, kind)
+      if (options.error) return { error: '价目表第 ' + (i + 1) + ' 条：' + options.error }
+      entry.options = options.options
+    }
+
+    out.push(entry)
+  }
+
+  return { items: out }
+}
+
+/** 校验并整理摊位数据 */
 function normalizeStallInput(payload) {
   const p = payload || {}
 
@@ -183,14 +292,16 @@ function normalizeStallInput(payload) {
   const rect = validateRect(p.ne, p.sw)
   if (rect.error) return rect
 
+  const price = normalizePriceItems(p.price_items)
+  if (price.error) return price
+
   return {
     doc: {
       name_zh: nameZh,
       name_en: String(p.name_en || '').trim(),
-      price_range: String(p.price_range || '').trim(),
+      price_items: price.items,
       ne: rect.ne,
-      sw: rect.sw,
-      sort_order: Number(p.sort_order) || 0
+      sw: rect.sw
     }
   }
 }
@@ -222,6 +333,7 @@ async function createStall(payload) {
 
   const doc = Object.assign({}, checked.doc, {
     zone_id: zoneId,
+    sort_order: await nextSortOrder(STALLS),
     is_deleted: false,
     created_at: new Date(),
     updated_at: new Date()
@@ -270,6 +382,7 @@ async function createZone(payload) {
   if (checked.error) return fail('INVALID_PARAM', checked.error)
 
   const doc = Object.assign({}, checked.doc, {
+    sort_order: await nextSortOrder(COLLECTION),
     created_at: new Date(),
     updated_at: new Date()
   })

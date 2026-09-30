@@ -15,9 +15,65 @@ const DEFAULT_SCALE = 14
 // 卡片收起动画时长，要和 wxss 里的 card-out 对上
 const CARD_CLOSE_ANIM_MS = 180
 
-function buildPolygons(zones, selectedId) {
-  return zones.map(function (zone) {
-    const active = zone._id === selectedId
+// 摊位只有几米见方，手指按不准，所以命中判断时把方框往外放一圈。
+// 只影响点击，不影响显示——显示永远是真实尺寸。
+const STALL_TAP_MARGIN_M = 6
+
+/**
+ * 摊位显示时的最小短边（米）。
+ *
+ * 0 = 显示真实尺寸，画多大就显示多大。
+ * 如果哪天觉得摊位小到看不清，把这个数调大，显示时会按比例放大到至少这么宽——
+ * 代价是看起来比实际大。曾经设成 10，结果 3×6 米的摊位被放大了三倍多，
+ * 一眼就看得出比例不对，所以改回真实尺寸了。
+ */
+const MIN_STALL_DISPLAY_M = 0
+
+function metersPerLatDegree() {
+  return 111320
+}
+
+/** 按比例放大矩形，保证短边不小于 MIN_STALL_DISPLAY_M 米。中心点不动 */
+function displayRect(ne, sw) {
+  const midLat = (ne.latitude + sw.latitude) / 2
+  const heightM = (ne.latitude - sw.latitude) * metersPerLatDegree()
+  const widthM =
+    (ne.longitude - sw.longitude) *
+    metersPerLatDegree() *
+    Math.cos((midLat * Math.PI) / 180)
+
+  const shortSide = Math.min(heightM, widthM)
+  if (MIN_STALL_DISPLAY_M <= 0 || shortSide <= 0 || shortSide >= MIN_STALL_DISPLAY_M) {
+    return { ne: ne, sw: sw }
+  }
+
+  const scale = MIN_STALL_DISPLAY_M / shortSide
+  const centerLat = midLat
+  const centerLng = (ne.longitude + sw.longitude) / 2
+  const halfLat = ((ne.latitude - sw.latitude) / 2) * scale
+  const halfLng = ((ne.longitude - sw.longitude) / 2) * scale
+
+  return {
+    ne: { latitude: centerLat + halfLat, longitude: centerLng + halfLng },
+    sw: { latitude: centerLat - halfLat, longitude: centerLng - halfLng }
+  }
+}
+
+function inflateRect(ne, sw, meters) {
+  const dLat = meters / 111320
+  const midLat = (ne.latitude + sw.latitude) / 2
+  const dLng = meters / (111320 * Math.cos((midLat * Math.PI) / 180))
+
+  return {
+    ne: { latitude: ne.latitude + dLat, longitude: ne.longitude + dLng },
+    sw: { latitude: sw.latitude - dLat, longitude: sw.longitude - dLng }
+  }
+}
+
+/** 绿色的是夜市区域，橙色的是摊位，选中的那份颜色更深 */
+function buildPolygons(zones, stalls, zoneId, stallId) {
+  const list = zones.map(function (zone) {
+    const active = zone._id === zoneId
     return {
       points: geo.rectToPoints(zone.ne, zone.sw),
       strokeWidth: active ? 3 : 2,
@@ -26,13 +82,63 @@ function buildPolygons(zones, selectedId) {
       zIndex: active ? 100 : 10
     }
   })
+
+  stalls.forEach(function (stall) {
+    const active = stall._id === stallId
+    const box = displayRect(stall.ne, stall.sw)
+    list.push({
+      points: geo.rectToPoints(box.ne, box.sw),
+      strokeWidth: active ? 3 : 2,
+      strokeColor: active ? theme.stallStrokeActive : theme.stallStroke,
+      fillColor: active ? theme.stallFillActive : theme.stallFill,
+      zIndex: active ? 300 : 200
+    })
+  })
+
+  return list
 }
 
-function decorate(zone, lang) {
+/**
+ * 按当前语言取名字。
+ *
+ * 中文模式下就只显示中文——不再把英文名当副标题挂在下面。
+ * 英文要等到用户主动切了语言才出现（英文缺失时回退中文）。
+ */
+function decorate(item, lang) {
   const isEn = lang === 'en'
-  return Object.assign({}, zone, {
-    displayName: isEn ? zone.name_en || zone.name_zh : zone.name_zh,
-    displayNameSub: isEn ? zone.name_zh : zone.name_en || ''
+  return Object.assign({}, item, {
+    displayName: isEn ? item.name_en || item.name_zh : item.name_zh
+  })
+}
+
+/**
+ * 把价目表整理成能直接渲染的样子。
+ *
+ * 三种模板在这里统一：系列的价格挂在标题上（同价），单品的价格在每条搭配上，
+ * 增项只有名字和价格。
+ */
+function buildMenu(items) {
+  const isEn = i18n.getLang() === 'en'
+  const currency = i18n.t('priceUnit')
+
+  return (items || []).map(function (item, index) {
+    const kind = item.kind || 'single'
+
+    return {
+      key: index,
+      kind: kind,
+      name: isEn ? item.name_en || item.name_zh : item.name_zh,
+      priceText: item.price === undefined || item.price === null ? '' : item.price + currency,
+      note: item.note_zh || '',
+      options: (item.options || []).map(function (option, optionIndex) {
+        return {
+          key: optionIndex,
+          name: isEn ? option.name_en || option.name_zh : option.name_zh,
+          priceText:
+            option.price === undefined || option.price === null ? '' : option.price + currency
+        }
+      })
+    }
   })
 }
 
@@ -47,8 +153,14 @@ Page({
 
     loading: true,
     loadError: '',
+    stallError: '',
 
     bubbles: [],
+
+    // 当前选中的夜市里的摊位，以及被点开的那个摊位
+    stalls: [],
+    selectedStall: null,
+    stallLabels: [],
 
     starList: [1, 2, 3, 4, 5],
     selectedZone: null,
@@ -58,6 +170,8 @@ Page({
   onLoad() {
     this.zones = []
     this.selectedId = ''
+    this.stalls = []
+    this.selectedStallId = ''
     this.closingTimer = null
     this.mapRect = null
     this.regionBusy = false
@@ -129,6 +243,8 @@ Page({
       .then((zones) => {
         this.zones = zones || []
         this.selectedId = ''
+        this.stalls = []
+        this.selectedStallId = ''
         this.draft = null
         this.setData({ loading: false })
         this.render()
@@ -137,6 +253,8 @@ Page({
       .catch((err) => {
         this.zones = []
         this.selectedId = ''
+        this.stalls = []
+        this.selectedStallId = ''
         this.draft = null
         this.setData({
           loading: false,
@@ -149,6 +267,13 @@ Page({
 
   onRetry() {
     this.loadZones()
+  },
+
+  onRetryStalls() {
+    const zone = this.zones.filter((item) => {
+      return item._id === this.selectedId
+    })[0]
+    if (zone) this.loadStalls(zone)
   },
 
   // ---------- 渲染 ----------
@@ -165,7 +290,7 @@ Page({
 
   renderMap() {
     this.setData({
-      polygons: buildPolygons(this.zones, this.selectedId),
+      polygons: buildPolygons(this.zones, this.stalls || [], this.selectedId, this.selectedStallId),
       zoneCount: this.zones.length
     })
   },
@@ -196,9 +321,28 @@ Page({
         : ''
       selected.statusPending = !!(mine && mine.pending)
       selected.ratingHint = selected.rated ? i18n.t('ratingHintNote') : i18n.t('ratingHintTap')
+      // 「摊点数量」这行现在显示真实数字，也顺便当个诊断：
+      // 显示 0 说明后台还没给这个夜市录摊位
+      selected.stallCount = found._id === this.selectedId ? (this.stalls || []).length : 0
     }
 
-    this.setData({ selectedZone: selected })
+    let stall = null
+    if (this.selectedStallId) {
+      const picked = (this.stalls || []).filter(function (item) {
+        return item._id === this.selectedStallId
+      })[0]
+
+      if (picked) {
+        stall = decorate(picked, i18n.getLang())
+        stall.menu = buildMenu(picked.price_items)
+      }
+    }
+
+    this.setData({
+      selectedZone: selected,
+      selectedStall: stall,
+      stalls: this.stalls || []
+    })
   },
 
   // ---------- 地图上的星星气泡 ----------
@@ -267,48 +411,148 @@ Page({
       })
   },
 
-  renderBubbles(region) {
-    const rated = this.zones.filter(function (zone) {
-      return zone.mine && zone.mine.stars
-    })
-
-    if (!rated.length) {
-      this.stopBubbleLoop()
-      if (this.data.bubbles.length) this.setData({ bubbles: [] })
-      return
-    }
-
-    this.startBubbleLoop()
+  /** 当前视野下，经纬度换到屏幕像素 */
+  projectionOf(region) {
+    const rect = this.mapRect
+    if (!rect || !region || !region.southwest || !region.northeast) return null
 
     const west = region.southwest.longitude
     const east = region.northeast.longitude
     const south = region.southwest.latitude
     const north = region.northeast.latitude
-    if (!(east > west) || !(north > south)) return
+    if (!(east > west) || !(north > south)) return null
 
-    const rect = this.mapRect
+    return {
+      rect: rect,
+      x: function (lng) {
+        return rect.left + ((lng - west) / (east - west)) * rect.width
+      },
+      y: function (lat) {
+        return rect.top + ((north - lat) / (north - south)) * rect.height
+      }
+    }
+  },
+
+  /** 画星星气泡（打过分的夜市）和摊位名字标签 */
+  renderBubbles(region) {
+    const project = this.projectionOf(region)
+    if (!project) return
+
+    const rect = project.rect
     const bubbles = []
 
-    rated.forEach(function (zone, index) {
-      const center = geo.rectCenter(zone.ne, zone.sw)
-      const x = rect.left + ((center.longitude - west) / (east - west)) * rect.width
-      const y = rect.top + ((north - center.latitude) / (north - south)) * rect.height
+    this.zones
+      .filter(function (zone) {
+        return zone.mine && zone.mine.stars
+      })
+      .forEach(function (zone, index) {
+        const center = geo.rectCenter(zone.ne, zone.sw)
+        const x = project.x(center.longitude)
+        const y = project.y(center.latitude)
 
-      // 滑出屏幕的就不渲染
-      if (x < rect.left - 60 || x > rect.left + rect.width + 60) return
-      if (y < rect.top - 60 || y > rect.top + rect.height + 60) return
+        // 滑出屏幕的就不渲染
+        if (x < rect.left - 60 || x > rect.left + rect.width + 60) return
+        if (y < rect.top - 60 || y > rect.top + rect.height + 60) return
 
-      bubbles.push({
-        key: zone._id,
-        x: Math.round(x),
-        y: Math.round(y),
-        delay: (index % 5) * 0.22
+        bubbles.push({
+          key: zone._id,
+          x: Math.round(x),
+          y: Math.round(y),
+          delay: (index % 5) * 0.22
+        })
+      })
+
+    const labels = this.selectedId && (this.stalls || []).length
+      ? this.buildStallLabels(project)
+      : []
+
+    // 有东西要跟着地图走就开轮询，没有就停掉
+    if (bubbles.length || labels.length) this.startBubbleLoop()
+    else this.stopBubbleLoop()
+
+    // 位置没变就别 setData，轮询才不会变成无谓的开销
+    if (!this.sameBubbles(bubbles)) this.setData({ bubbles: bubbles })
+    if (!this.sameLabels(labels)) this.setData({ stallLabels: labels })
+  },
+
+  /**
+   * 摊位名字的排布。
+   *
+   * 规则：默认贴在方框外、上方；如果和左边那个标签横向撞上了，
+   * 就挪到方框下方——上下交错，互相不压。
+   *
+   * 估宽只影响"要不要错开"这个判断，不影响名字本身的显示。
+   */
+  buildStallLabels(project) {
+    const isEn = i18n.getLang() === 'en'
+    const rect = project.rect
+    const items = []
+
+    this.stalls.forEach(function (stall) {
+      const name = isEn ? stall.name_en || stall.name_zh : stall.name_zh
+      if (!name) return
+
+      const box = displayRect(stall.ne, stall.sw)
+      const left = project.x(box.sw.longitude)
+      const right = project.x(box.ne.longitude)
+      const top = project.y(box.ne.latitude)
+      const bottom = project.y(box.sw.latitude)
+      const centerX = (left + right) / 2
+
+      if (centerX < rect.left - 120 || centerX > rect.left + rect.width + 120) return
+
+      items.push({
+        key: stall._id,
+        text: name,
+        centerX: centerX,
+        top: top,
+        bottom: bottom,
+        width: Math.max(52, name.length * 15 + 14)
       })
     })
 
-    // 位置没变就别 setData，轮询才不会变成无谓的开销
-    if (this.sameBubbles(bubbles)) return
-    this.setData({ bubbles: bubbles })
+    items.sort(function (a, b) {
+      return a.centerX - b.centerX
+    })
+
+    const GAP = 6
+    const rowRight = [-Infinity, -Infinity]
+    const labels = []
+
+    items.forEach(function (item) {
+      const left = item.centerX - item.width / 2
+      const right = item.centerX + item.width / 2
+
+      let row = 0
+      if (left < rowRight[0] + GAP) {
+        row = 1
+        // 下面也挤，就还是回上面，挤一挤总比叠在一起强
+        if (left < rowRight[1] + GAP) row = 0
+      }
+      rowRight[row] = right
+
+      labels.push({
+        key: item.key,
+        text: item.text,
+        x: Math.round(item.centerX),
+        y: Math.round(row === 0 ? item.top - 6 : item.bottom + 6),
+        below: row === 1
+      })
+    })
+
+    return labels
+  },
+
+  sameLabels(next) {
+    const current = this.data.stallLabels
+    if (current.length !== next.length) return false
+
+    for (let i = 0; i < next.length; i++) {
+      if (current[i].key !== next[i].key) return false
+      if (current[i].x !== next[i].x || current[i].y !== next[i].y) return false
+      if (current[i].below !== next[i].below) return false
+    }
+    return true
   },
 
   sameBubbles(next) {
@@ -364,9 +608,32 @@ Page({
     if (typeof detail.latitude !== 'number' || typeof detail.longitude !== 'number') return
 
     const point = { latitude: detail.latitude, longitude: detail.longitude }
+
+    // 摊位盖在区域上面，所以先看有没有点中摊位
+    if (this.selectedId && (this.stalls || []).length) {
+      const stall = this.stalls.filter(function (item) {
+        const shown = displayRect(item.ne, item.sw)
+        const box = inflateRect(shown.ne, shown.sw, STALL_TAP_MARGIN_M)
+        return geo.pointInRect(point, box.ne, box.sw)
+      })[0]
+
+      if (stall) {
+        this.selectedStallId = stall._id
+        this.render()
+        return
+      }
+    }
+
     const found = this.zones.filter(function (zone) {
       return geo.pointInRect(point, zone.ne, zone.sw)
     })[0]
+
+    // 卡片是两层的：开着摊位卡片时，点别处先退回夜市卡片
+    if (this.data.selectedStall) {
+      this.selectedStallId = ''
+      this.render()
+      return
+    }
 
     if (!found) {
       this.closeCard()
@@ -379,8 +646,45 @@ Page({
     this.flushDraft()
     this.cancelClosing()
     this.selectedId = found._id
+    this.selectedStallId = ''
+    this.stalls = []
     this.openDraft(found)
+    this.loadStalls(found)
+    this.fitZone(found)
     this.render()
+  },
+
+  /** 把视野缩放到刚好装下这个夜市。底部留出卡片的位置 */
+  fitZone(zone) {
+    wx.createMapContext('market-map').includePoints({
+      points: [
+        { latitude: zone.ne.latitude, longitude: zone.ne.longitude },
+        { latitude: zone.sw.latitude, longitude: zone.sw.longitude }
+      ],
+      padding: [80, 60, 340, 60]
+    })
+  },
+
+  loadStalls(zone) {
+    const zoneId = zone._id
+
+    cloud
+      .callCloud('zone', 'stalls', { zoneId: zoneId })
+      .then((list) => {
+        // 用户可能已经切到别的夜市了，晚到的结果丢掉
+        if (this.selectedId !== zoneId) return
+        this.stalls = list || []
+        this.setData({ stallError: '' })
+        this.render()
+        // 摊位名字要靠地图视野换算位置，拉到数据后立刻画一遍
+        this.updateBubbles()
+      })
+      .catch((err) => {
+        // 这里必须让用户看得见：如果云函数还没部署新版，
+        // 报错会被 console 吞掉，表现成"后台明明加了摊位却显示 0"
+        console.warn('[map] 读取摊位失败', err)
+        this.setData({ stallError: err.msg || '读取摊位失败' })
+      })
   },
 
   // ---------- 卡片里的评分草稿 ----------
@@ -492,6 +796,8 @@ Page({
     this.closingTimer = setTimeout(() => {
       this.closingTimer = null
       this.selectedId = ''
+      this.stalls = []
+      this.selectedStallId = ''
       this.setData({ cardClosing: false })
       this.render()
     }, CARD_CLOSE_ANIM_MS)

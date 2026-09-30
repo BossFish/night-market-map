@@ -54,6 +54,29 @@
   }
 }
 
+/* ---------- 摊位名字 ---------- */
+
+.stall-label {
+  position: fixed;
+  z-index: 13;
+  padding: 4rpx 12rpx;
+  /* 默认贴在坐标点（方框上边）的上方 */
+  transform: translate(-50%, -100%);
+  border-radius: 6rpx;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.16);
+  color: #9A3412;
+  font-size: 20rpx;
+  line-height: 1.5;
+  white-space: nowrap;
+  /* 点名字等于点它下面那个摊位 */
+  pointer-events: none;
+}
+
+.stall-label--below {
+  transform: translate(-50%, 0);
+}
+
 /* ---------- 底部提示条 ---------- */
 
 .hint {
@@ -102,6 +125,91 @@
 
 .card--closing {
   animation: card-out 180ms ease-in forwards;
+}
+
+/* 被摊位卡片盖住的夜市卡片：变灰、退到后面 */
+.card--dimmed {
+  z-index: 20;
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+/* 摊位卡片压在夜市卡片上面 */
+.card--stall {
+  z-index: 40;
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+/* ---------- 价目表 ---------- */
+
+.menu {
+  margin-top: 20rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid var(--divider);
+}
+
+.menu__block {
+  margin-bottom: 20rpx;
+}
+
+.menu__block:last-child {
+  margin-bottom: 0;
+}
+
+.menu__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.menu__name {
+  flex: 1;
+  color: var(--text-primary);
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.menu__price {
+  flex-shrink: 0;
+  color: #EA580C;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.menu__note {
+  margin-top: 4rpx;
+  color: var(--text-muted);
+  font-size: 22rpx;
+  line-height: 1.6;
+}
+
+.menu__option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 8rpx;
+  padding-left: 20rpx;
+}
+
+.menu__option-name {
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: 26rpx;
+}
+
+.menu__option-price {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 26rpx;
+}
+
+.menu__empty {
+  margin-top: 20rpx;
+  color: var(--text-muted);
+  font-size: 26rpx;
 }
 
 @keyframes card-in {
