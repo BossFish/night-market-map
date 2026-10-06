@@ -79,6 +79,26 @@
 
 /* ---------- 底部提示条 ---------- */
 
+.loading-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-box {
+  padding: 22rpx 44rpx;
+  border-radius: 12rpx;
+  background: rgba(20, 24, 31, 0.82);
+  color: #F9FAFB;
+  font-size: 28rpx;
+}
+
 .hint {
   position: fixed;
   left: 50%;
@@ -98,8 +118,9 @@
   position: fixed;
   left: 40rpx;
   right: 40rpx;
-  bottom: 64rpx;
-  z-index: 16;
+  /* 放在顶部：底部全是卡片，提示条放下面一定会被压住 */
+  top: 110rpx;
+  z-index: 160;
   padding: 18rpx 28rpx;
   border-radius: 16rpx;
   background: rgba(153, 27, 27, 0.92);
@@ -142,6 +163,30 @@
 }
 
 /* ---------- 价目表 ---------- */
+
+.stall-list {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 20rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid var(--divider);
+}
+
+.stall-list__item {
+  margin: 0 14rpx 14rpx 0;
+  padding: 10rpx 24rpx;
+  border: 1rpx solid var(--divider);
+  border-radius: 999rpx;
+  color: var(--text-secondary);
+  font-size: 26rpx;
+}
+
+.stall-list__item--on {
+  border-color: #EA580C;
+  background: #FFF7ED;
+  color: #9A3412;
+  font-weight: 500;
+}
 
 .menu {
   margin-top: 20rpx;
@@ -249,6 +294,17 @@
   line-height: 1.3;
 }
 
+.card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.card__star {
+  flex-shrink: 0;
+  font-size: 34rpx;
+}
+
 .card__sub {
   margin-top: 4rpx;
   color: var(--text-secondary);
@@ -349,12 +405,28 @@
 }
 
 .chip {
+  position: relative;
+  overflow: hidden;
   margin: 0 12rpx 12rpx 0;
   padding: 10rpx 24rpx;
   border: 1rpx solid var(--divider);
   border-radius: 999rpx;
   color: var(--text-secondary);
   font-size: 26rpx;
+}
+
+/* 绿色填充：从胶囊左边长到对应百分比的位置。百分比本身不显示 */
+.chip__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(34, 197, 94, 0.28);
+  transition: width 420ms ease-out;
+}
+
+.chip__label {
+  position: relative;
 }
 
 .chip--on {

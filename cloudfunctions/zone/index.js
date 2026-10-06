@@ -177,22 +177,22 @@ function weightedAverage(docs, penalized) {
  * 等数据量真的长起来，再改成管道里算或把结果缓存起来。
  */
 async function summarize() {
-  let docs = []
+  let all = []
 
   try {
-    const res = await db
-      .collection(RATINGS)
-      .where({ created_at: _.lte(effectiveBefore()) })
-      .limit(MAX_RATINGS_SCAN)
-      .get()
-    docs = res.data
+    const res = await db.collection(RATINGS).limit(MAX_RATINGS_SCAN).get()
+    all = res.data
   } catch (err) {
     if (isCollectionMissing(err)) return {}
     throw err
   }
 
-  if (!docs.length) return {}
+  if (!all.length) return {}
 
+  // 分数只算已生效的
+  const docs = all.filter(function (doc) {
+    return !isPending(doc)
+  })
   const penalized = await penalizedOpenids()
 
   const byZone = {}
@@ -201,15 +201,43 @@ async function summarize() {
     byZone[doc.zone_id].push(doc)
   })
 
+  // 四个维度的票数按区域算，而且**不排除未生效的评分**——
+  // 维度描述的是"这地方什么样"，不是分数，投完马上看到才有意义
+  const aspectByZone = {}
+  all.forEach(function (doc) {
+    if (!aspectByZone[doc.zone_id]) aspectByZone[doc.zone_id] = []
+    aspectByZone[doc.zone_id].push(doc)
+  })
+
   const result = {}
-  Object.keys(byZone).forEach(function (zoneId) {
-    const group = byZone[zoneId]
+  Object.keys(aspectByZone).forEach(function (zoneId) {
+    const group = byZone[zoneId] || []
     result[zoneId] = {
-      avg: weightedAverage(trimExtremes(group), penalized),
-      count: group.length
+      avg: group.length ? weightedAverage(trimExtremes(group), penalized) : 0,
+      count: group.length,
+      aspects: countAspects(aspectByZone[zoneId])
     }
   })
   return result
+}
+
+/** 每个维度里，三个词各被选了多少次 */
+function countAspects(docs) {
+  const out = {}
+
+  ASPECT_KEYS.forEach(function (key) {
+    out[key] = [0, 0, 0]
+  })
+
+  docs.forEach(function (doc) {
+    const aspects = doc.aspects || {}
+    ASPECT_KEYS.forEach(function (key) {
+      const value = aspects[key]
+      if (value === 0 || value === 1 || value === 2) out[key][value] += 1
+    })
+  })
+
+  return out
 }
 
 async function findRating(zoneId, openid) {
@@ -292,7 +320,7 @@ async function listZones(openid) {
     })
     .map(function (doc) {
       return Object.assign(toClientZone(doc), {
-        rating: overview[doc._id] || { avg: 0, count: 0 },
+        rating: overview[doc._id] || { avg: 0, count: 0, aspects: {} },
         mine: toClientMine(mineMap[doc._id])
       })
     })

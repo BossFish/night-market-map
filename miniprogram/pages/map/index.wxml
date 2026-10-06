@@ -37,6 +37,11 @@
 <!-- 右上角入口：我的 -->
 <view class="mine" bindtap="onOpenMine">{{T.mineEntry}}</view>
 
+<!-- 拉摊位时的加载提示：屏幕正中，没有动画，加载完就关掉 -->
+<view class="loading-mask" wx:if="{{stallLoading}}">
+  <view class="loading-box">{{T.mapLoading}}</view>
+</view>
+
 <!-- 底部提示：只有没选中任何区域、且不在加载/报错时才显示 -->
 <view class="hint" wx:if="{{!selectedZone && !loadError}}">
   {{loading ? T.mapLoading : (zoneCount === 0 ? T.mapEmpty : T.mapHintTap)}}
@@ -64,7 +69,11 @@
 <view class="card {{cardClosing ? 'card--closing' : ''}} {{selectedStall ? 'card--dimmed' : ''}}" wx:if="{{selectedZone}}">
   <view class="card__handle"></view>
 
-  <view class="card__title">{{selectedZone.displayName}}</view>
+  <view class="card__title-row">
+    <text class="card__title">{{selectedZone.displayName}}</text>
+    <!-- 打过分的夜市，星星从地图上挪到这里 -->
+    <text class="card__star" wx:if="{{selectedZone.rated}}">⭐</text>
+  </view>
 
   <view class="card__rows">
     <view class="card__row" wx:if="{{selectedZone.business_hours}}">
@@ -77,7 +86,7 @@
       <text class="card__value {{selectedZone.ratingConfident ? '' : 'card__value--muted'}}">{{selectedZone.ratingText}}</text>
     </view>
 
-    <view class="card__row">
+    <view class="card__row" wx:if="{{selectedZone.showMyRating}}">
       <text class="card__label">{{T.cardMyRating}}</text>
       <view class="rate">
         <view class="rate__top">
@@ -106,6 +115,20 @@
   </view>
 
   <!--
+    摊位列表：地图上的橙色方框只有几个像素宽，手指很难点中，
+    所以这里再给一份名字列表，点名字和点方框是同一件事。
+  -->
+  <view class="stall-list" wx:if="{{selectedZone.stallList.length}}">
+    <view
+      class="stall-list__item {{item._id === selectedStall._id ? 'stall-list__item--on' : ''}}"
+      wx:for="{{selectedZone.stallList}}"
+      wx:key="_id"
+      data-id="{{item._id}}"
+      bindtap="onTapStallRow"
+    >{{item.name}}</view>
+  </view>
+
+  <!--
     四个维度：只摆词，不摆维度名。
     选了星星之后才出现——没打分就先填这些没有意义。
   -->
@@ -119,7 +142,11 @@
         data-dimension="{{row.dimensionKey}}"
         data-value="{{opt.value}}"
         bindtap="onPickAspect"
-      >{{opt.label}}</text>
+      ><text
+          class="chip__fill"
+          wx:if="{{row.showFill}}"
+          style="width: {{opt.percent}}%;"
+        ></text><text class="chip__label">{{opt.label}}</text></text>
     </view>
   </view>
 

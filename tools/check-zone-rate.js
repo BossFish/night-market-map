@@ -450,6 +450,16 @@ async function run() {
       aspectsAfter.data.aspects.management === undefined
   ])
 
+  const listWithAspects = await zoneFn.main({ action: 'list' })
+  const z1Aspects = zoneOf(listWithAspects, 'z1').rating.aspects
+  checks.push([
+    '四个维度的票数被统计出来，能直接喂给前端的绿色填充',
+    z1Aspects.hygiene[0] === 1 &&
+      z1Aspects.seating[2] === 1 &&
+      z1Aspects.crowding[1] === 1 &&
+      z1Aspects.management.join(',') === '0,0,0'
+  ])
+
   // ---------- 我的打分 ----------
 
   reset()

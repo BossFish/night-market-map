@@ -15,17 +15,19 @@ const DEFAULT_SCALE = 14
 // 卡片收起动画时长，要和 wxss 里的 card-out 对上
 const CARD_CLOSE_ANIM_MS = 180
 
-// 摊位只有几米见方，手指按不准，所以命中判断时把方框往外放一圈。
-// 只影响点击，不影响显示——显示永远是真实尺寸。
-const STALL_TAP_MARGIN_M = 6
+// 触摸区域和显示区域保持一致：点哪儿就是哪儿，不往外扩。
+// 之前为了好点中往外放了 6 米，结果点旁边空的地方也会选中，反而困惑。
+const STALL_TAP_MARGIN_M = 0
 
 /**
  * 摊位显示时的最小短边（米）。
  *
- * 0 = 显示真实尺寸，画多大就显示多大。
- * 如果哪天觉得摊位小到看不清，把这个数调大，显示时会按比例放大到至少这么宽——
- * 代价是看起来比实际大。曾经设成 10，结果 3×6 米的摊位被放大了三倍多，
- * 一眼就看得出比例不对，所以改回真实尺寸了。
+ * 摊位显示时的最小短边（米）。0 = 严格按真实尺寸显示，画多大就显示多大。
+ *
+ * 曾经为了让小摊位看得见、点得中，把它设成 6 或 10，结果框比实际大好几倍，
+ * 一眼就看得出比例不对。现在改回真实尺寸：**显示和触摸都按真实大小来**。
+ * 代价是 3×6 米的摊位在能看全夜市的缩放下只有几像素，要点中得先双指放大，
+ * 或者用夜市卡片里的摊位名字列表。
  */
 const MIN_STALL_DISPLAY_M = 0
 
@@ -161,6 +163,8 @@ Page({
     stalls: [],
     selectedStall: null,
     stallLabels: [],
+    // 拉摊位数据的时候在屏幕中间挡一层，不然点完区域会有一小段没反应的空白
+    stallLoading: false,
 
     starList: [1, 2, 3, 4, 5],
     selectedZone: null,
@@ -172,6 +176,7 @@ Page({
     this.selectedId = ''
     this.stalls = []
     this.selectedStallId = ''
+    this.selectedStall = null
     this.closingTimer = null
     this.mapRect = null
     this.regionBusy = false
@@ -245,6 +250,7 @@ Page({
         this.selectedId = ''
         this.stalls = []
         this.selectedStallId = ''
+    this.selectedStall = null
         this.draft = null
         this.setData({ loading: false })
         this.render()
@@ -255,6 +261,7 @@ Page({
         this.selectedId = ''
         this.stalls = []
         this.selectedStallId = ''
+    this.selectedStall = null
         this.draft = null
         this.setData({
           loading: false,
@@ -315,7 +322,13 @@ Page({
       selected.ratingConfident = described.confident
       selected.myStars = myStars
       selected.rated = myStars > 0
-      selected.aspectRows = aspects.buildRows(myAspects)
+      // 分数选完之后，下次打开卡片就不再显示「你的评分」了
+      selected.showMyRating = !mine
+      // 维度选中过的才显示所有人的比例
+      selected.aspectRows = aspects.buildRows(
+        myAspects,
+        (found.rating && found.rating.aspects) || {}
+      )
       selected.statusText = mine
         ? i18n.t(mine.pending ? 'ratingStatusPending' : 'ratingStatusActive')
         : ''
@@ -324,18 +337,24 @@ Page({
       // 「摊点数量」这行现在显示真实数字，也顺便当个诊断：
       // 显示 0 说明后台还没给这个夜市录摊位
       selected.stallCount = found._id === this.selectedId ? (this.stalls || []).length : 0
+      // 摊位在手机上只有几个像素宽，直接点方框很难点中，
+      // 所以卡片里再给一份名字列表，点名字一样能打开摊位卡片
+      selected.stallList = (this.stalls || []).map(function (stall) {
+        return {
+          _id: stall._id,
+          name: i18n.getLang() === 'en' ? stall.name_en || stall.name_zh : stall.name_zh
+        }
+      })
     }
 
     let stall = null
-    if (this.selectedStallId) {
-      const picked = (this.stalls || []).filter(function (item) {
-        return item._id === this.selectedStallId
-      })[0]
-
-      if (picked) {
-        stall = decorate(picked, i18n.getLang())
-        stall.menu = buildMenu(picked.price_items)
-      }
+    // 直接用手上那个摊位对象，不再拿 id 回列表里查。
+    // 之前是"只存 id、渲染时回查"，一旦列表被重新拉过（id 变了）就查不到，
+    // 表现成"命中成功却弹不出卡片"
+    if (this.selectedStall) {
+      const picked = this.selectedStall
+      stall = decorate(picked, i18n.getLang())
+      stall.menu = buildMenu(picked.price_items)
     }
 
     this.setData({
@@ -440,12 +459,16 @@ Page({
 
     const rect = project.rect
     const bubbles = []
+    const selectedId = this.selectedId
 
     this.zones
       .filter(function (zone) {
         return zone.mine && zone.mine.stars
       })
       .forEach(function (zone, index) {
+        // 这个夜市正开着卡片时，星星挪到卡片里显示，地图上就先不画
+        if (zone._id === selectedId) return
+
         const center = geo.rectCenter(zone.ne, zone.sw)
         const x = project.x(center.longitude)
         const y = project.y(center.latitude)
@@ -619,6 +642,8 @@ Page({
 
       if (stall) {
         this.selectedStallId = stall._id
+        this.selectedStall = stall
+        this.setData({ stallError: '' })
         this.render()
         return
       }
@@ -628,9 +653,18 @@ Page({
       return geo.pointInRect(point, zone.ne, zone.sw)
     })[0]
 
+    // 临时诊断：点在这个夜市里、也有摊位，却没命中任何一个。
+    // 这行红字能告诉我们"是命中判断偏了"而不是"数据没加载"
+    if (found && found._id === this.selectedId && (this.stalls || []).length) {
+      this.setData({
+        stallError: '点到了区域，但没命中摊位（这个区域有 ' + this.stalls.length + ' 个）'
+      })
+    }
+
     // 卡片是两层的：开着摊位卡片时，点别处先退回夜市卡片
     if (this.data.selectedStall) {
       this.selectedStallId = ''
+    this.selectedStall = null
       this.render()
       return
     }
@@ -647,11 +681,14 @@ Page({
     this.cancelClosing()
     this.selectedId = found._id
     this.selectedStallId = ''
+    this.selectedStall = null
     this.stalls = []
     this.openDraft(found)
     this.loadStalls(found)
     this.fitZone(found)
     this.render()
+    // 星星要挪进卡片里，地图上那份得重新算
+    this.updateBubbles()
   },
 
   /** 把视野缩放到刚好装下这个夜市。底部留出卡片的位置 */
@@ -667,6 +704,7 @@ Page({
 
   loadStalls(zone) {
     const zoneId = zone._id
+    this.setData({ stallLoading: true, stallError: '' })
 
     cloud
       .callCloud('zone', 'stalls', { zoneId: zoneId })
@@ -674,7 +712,7 @@ Page({
         // 用户可能已经切到别的夜市了，晚到的结果丢掉
         if (this.selectedId !== zoneId) return
         this.stalls = list || []
-        this.setData({ stallError: '' })
+        this.setData({ stallLoading: false, stallError: '' })
         this.render()
         // 摊位名字要靠地图视野换算位置，拉到数据后立刻画一遍
         this.updateBubbles()
@@ -683,7 +721,7 @@ Page({
         // 这里必须让用户看得见：如果云函数还没部署新版，
         // 报错会被 console 吞掉，表现成"后台明明加了摊位却显示 0"
         console.warn('[map] 读取摊位失败', err)
-        this.setData({ stallError: err.msg || '读取摊位失败' })
+        this.setData({ stallLoading: false, stallError: err.msg || '读取摊位失败' })
       })
   },
 
@@ -724,6 +762,36 @@ Page({
 
     if (!dimensionKey || !this.draft || !this.draft.stars) return
     if (this.draft.aspects[dimensionKey] === value) return
+
+    // 已经提交过的维度，卡片里就只看了——想改去「我的 → 我的打分」。
+    // 只有这次打开卡片新填的（草稿），关闭前还能反悔
+    const current = this.zones.filter((item) => {
+      return item._id === this.selectedId
+    })[0]
+    const submitted = current && current.mine && current.mine.aspects
+    if (submitted && submitted[dimensionKey] !== undefined) {
+      wx.showToast({ title: i18n.t('aspectLockedHint'), icon: 'none' })
+      return
+    }
+
+    // 本地先把自己这票算进去，绿色填充立刻就有动静，
+    // 不用等关卡片提交、再重新拉一次列表
+    const zone = this.zones.filter((item) => {
+      return item._id === this.selectedId
+    })[0]
+
+    if (zone) {
+      if (!zone.rating) zone.rating = { avg: 0, count: 0, aspects: {} }
+      if (!zone.rating.aspects) zone.rating.aspects = {}
+      if (!Array.isArray(zone.rating.aspects[dimensionKey])) {
+        zone.rating.aspects[dimensionKey] = [0, 0, 0]
+      }
+
+      const bucket = zone.rating.aspects[dimensionKey]
+      const previous = this.draft.aspects[dimensionKey]
+      if (previous !== undefined && bucket[previous] > 0) bucket[previous] -= 1
+      if (value >= 0 && value < bucket.length) bucket[value] += 1
+    }
 
     this.draft.aspects[dimensionKey] = value
     this.draft.dirty = true
@@ -787,6 +855,31 @@ Page({
     })
   },
 
+  /** 点卡片里的摊位名字，和点地图上的橙色方框是同一件事 */
+  onTapStallRow(e) {
+    const id = e.currentTarget.dataset.id
+    if (!id) return
+
+    const stall = (this.stalls || []).filter(function (item) {
+      return item._id === id
+    })[0]
+    if (!stall) return
+
+    this.selectedStallId = id
+    this.selectedStall = stall
+    this.setData({ stallError: '' })
+    this.render()
+
+    // 顺带把地图挪到那个摊位上，让人看清方框在哪
+    this.focusStall(stall)
+  },
+
+  focusStall(stall) {
+    const center = geo.rectCenter(stall.ne, stall.sw)
+    // 地图中心由 latitude / longitude 这两个属性控制，改它们就会挪视野
+    this.setData({ latitude: center.latitude, longitude: center.longitude })
+  },
+
   closeCard() {
     if (!this.selectedId || this.data.cardClosing) return
 
@@ -798,8 +891,11 @@ Page({
       this.selectedId = ''
       this.stalls = []
       this.selectedStallId = ''
+    this.selectedStall = null
       this.setData({ cardClosing: false })
       this.render()
+      // 卡片收回了，星星重新回到地图上
+      this.updateBubbles()
     }, CARD_CLOSE_ANIM_MS)
   },
 
