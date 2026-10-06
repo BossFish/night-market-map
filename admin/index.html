@@ -45,7 +45,6 @@
             <th>营业时间</th>
             <th>东北角</th>
             <th>西南角</th>
-            <th>排序</th>
             <th>状态</th>
             <th class="table__ops">操作</th>
           </tr>
@@ -96,16 +95,10 @@
             <input id="fHours" class="input" type="text" placeholder="18:00 - 次日 02:00">
           </label>
 
-          <div class="row">
-            <label class="field field--grow">
-              <span class="field__label">排序（数字越小越靠前）</span>
-              <input id="fSort" class="input" type="number" step="1">
-            </label>
-            <label class="field field--check">
-              <input id="fVisible" type="checkbox">
-              <span>在小程序里显示</span>
-            </label>
-          </div>
+          <label class="field field--check field--check-flat">
+            <input id="fVisible" type="checkbox">
+            <span>在小程序里显示</span>
+          </label>
 
           <fieldset class="fieldset">
             <legend>东北角（地图上偏右上）</legend>

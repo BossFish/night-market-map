@@ -64,8 +64,20 @@ code {
 }
 
 .banner {
-  padding: 12px 24px;
-  font-size: 14px;
+  /* 固定居中：不管页面滚到哪、上面盖着几层弹窗，提示都看得见 */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 200;
+  min-width: 280px;
+  max-width: 80vw;
+  padding: 20px 32px;
+  transform: translate(-50%, -50%);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(16, 24, 40, 0.28);
+  font-size: 15px;
+  text-align: center;
+  cursor: pointer;
 }
 
 .banner--error {
@@ -332,6 +344,11 @@ code {
   white-space: nowrap;
 }
 
+/* 不带上方对齐留白的勾选项（单独一行时用） */
+.field--check-flat {
+  padding-top: 0;
+}
+
 .row {
   display: flex;
   gap: 14px;
@@ -387,7 +404,7 @@ code {
 /* ---------- 编辑弹层的双栏布局：左边表单，右边地图 ---------- */
 
 .modal__box--wide {
-  width: min(1060px, calc(100vw - 48px));
+  width: min(1400px, calc(100vw - 48px));
 }
 
 .editor {
@@ -397,12 +414,13 @@ code {
 }
 
 .editor__form {
-  flex: 0 0 380px;
+  flex: 1;
+  min-width: 0;
 }
 
 .editor__map {
-  flex: 1;
-  min-width: 0;
+  /* 地图固定 500px，剩下的横向空间全留给左边的表单 */
+  flex: 0 0 500px;
 }
 
 .mapcanvas {
@@ -432,12 +450,17 @@ code {
 }
 
 /* 窗口窄的时候改成上下排列，免得地图被挤成一条 */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .editor {
     flex-direction: column;
   }
 
   .editor__form {
+    flex: none;
+    width: 100%;
+  }
+
+  .editor__map {
     flex: none;
     width: 100%;
   }

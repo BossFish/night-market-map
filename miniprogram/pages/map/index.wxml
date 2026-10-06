@@ -50,8 +50,11 @@
 <view class="card {{cardClosing ? 'card--closing' : ''}}" wx:if="{{selectedZone}}">
   <view class="card__handle"></view>
 
-  <view class="card__title">{{selectedZone.displayName}}</view>
-  <view class="card__sub" wx:if="{{selectedZone.displayNameSub}}">{{selectedZone.displayNameSub}}</view>
+  <view class="card__title-row">
+    <text class="card__title">{{selectedZone.displayName}}</text>
+    <!-- 打过分的夜市，星星从地图上挪到这里 -->
+    <text class="card__star" wx:if="{{selectedZone.rated}}">⭐</text>
+  </view>
 
   <view class="card__rows">
     <view class="card__row" wx:if="{{selectedZone.business_hours}}">
@@ -64,7 +67,7 @@
       <text class="card__value {{selectedZone.ratingConfident ? '' : 'card__value--muted'}}">{{selectedZone.ratingText}}</text>
     </view>
 
-    <view class="card__row">
+    <view class="card__row" wx:if="{{selectedZone.showMyRating}}">
       <text class="card__label">{{T.cardMyRating}}</text>
       <view class="rate">
         <view class="rate__top">
@@ -106,7 +109,11 @@
         data-dimension="{{row.dimensionKey}}"
         data-value="{{opt.value}}"
         bindtap="onPickAspect"
-      >{{opt.label}}</text>
+      ><text
+          class="chip__fill"
+          wx:if="{{row.showFill}}"
+          style="width: {{opt.percent}}%;"
+        ></text><text class="chip__label">{{opt.label}}</text></text>
     </view>
   </view>
 

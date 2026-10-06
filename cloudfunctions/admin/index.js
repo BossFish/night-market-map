@@ -144,10 +144,26 @@ function normalizeZoneInput(payload) {
       business_hours: String(p.business_hours || '').trim(),
       ne: { latitude: neLat, longitude: neLng },
       sw: { latitude: swLat, longitude: swLng },
-      sort_order: Number(p.sort_order) || 0,
       is_visible: p.is_visible !== false
     }
   }
+}
+
+/**
+ * 给新建的记录排一个顺序号。
+ *
+ * 排序字段还在数据库里（列表要靠它稳定排序），但后台不让填了——
+ * 新增时自动取现有最大值加一，相当于"按添加的先后排"。
+ */
+async function nextSortOrder() {
+  const res = await db.collection(COLLECTION).limit(300).get()
+
+  let max = 0
+  res.data.forEach(function (doc) {
+    const value = Number(doc.sort_order) || 0
+    if (value > max) max = value
+  })
+  return max + 1
 }
 
 /** 管理端要看到全部区域，包括已经下架的 */
@@ -164,6 +180,7 @@ async function createZone(payload) {
   if (checked.error) return fail('INVALID_PARAM', checked.error)
 
   const doc = Object.assign({}, checked.doc, {
+    sort_order: await nextSortOrder(),
     created_at: new Date(),
     updated_at: new Date()
   })

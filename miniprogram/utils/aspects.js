@@ -30,19 +30,34 @@ const DIMENSIONS = [
 
 /**
  * 生成四行待渲染的数据。
- * picked 形如 { hygiene: 0, seating: 2 }，没选的维度就不高亮。
+ * picked 形如 { hygiene: 0, seating: 2 }，是我自己选过的。
+ * counts 形如 { hygiene: [1, 5, 2] }，是所有人在这三个词上的票数。
+ *
+ * 绿色填充的规则：**这个维度我自己选过了**，才把所有人的比例显示出来；
+ * 没选过的维度保持普通样子——否则会形成从众，后看到的人会跟着多数走。
  */
-function buildRows(picked) {
+function buildRows(picked, counts) {
   const chosen = picked || {}
+  const buckets = counts || {}
 
   return DIMENSIONS.map(function (dimension) {
+    const key = dimension.dimensionKey
+    const answered = chosen[key] !== undefined
+    const bucket = Array.isArray(buckets[key]) ? buckets[key] : []
+    const total = bucket.reduce(function (sum, value) {
+      return sum + value
+    }, 0)
+    const showFill = answered && total > 0
+
     return {
-      dimensionKey: dimension.dimensionKey,
+      dimensionKey: key,
+      showFill: showFill,
       options: dimension.labels.map(function (labelKey, value) {
         return {
           value: value,
           label: i18n.t(labelKey),
-          selected: chosen[dimension.dimensionKey] === value
+          selected: chosen[key] === value,
+          percent: showFill ? Math.round(((bucket[value] || 0) / total) * 100) : 0
         }
       })
     }

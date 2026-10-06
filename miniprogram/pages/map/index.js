@@ -28,11 +28,16 @@ function buildPolygons(zones, selectedId) {
   })
 }
 
-function decorate(zone, lang) {
+/**
+ * 按当前语言取名字。
+ *
+ * 中文模式下就只显示中文——不再把英文名当副标题挂在下面。
+ * 英文要等到用户主动切了语言才出现（英文缺失时回退中文）。
+ */
+function decorate(item, lang) {
   const isEn = lang === 'en'
-  return Object.assign({}, zone, {
-    displayName: isEn ? zone.name_en || zone.name_zh : zone.name_zh,
-    displayNameSub: isEn ? zone.name_zh : zone.name_en || ''
+  return Object.assign({}, item, {
+    displayName: isEn ? item.name_en || item.name_zh : item.name_zh
   })
 }
 
@@ -190,7 +195,13 @@ Page({
       selected.ratingConfident = described.confident
       selected.myStars = myStars
       selected.rated = myStars > 0
-      selected.aspectRows = aspects.buildRows(myAspects)
+      // 分数选完之后，下次打开卡片就不再显示「你的评分」了
+      selected.showMyRating = !mine
+      // 维度选中过的才显示所有人的比例
+      selected.aspectRows = aspects.buildRows(
+        myAspects,
+        (found.rating && found.rating.aspects) || {}
+      )
       selected.statusText = mine
         ? i18n.t(mine.pending ? 'ratingStatusPending' : 'ratingStatusActive')
         : ''
@@ -288,8 +299,12 @@ Page({
 
     const rect = this.mapRect
     const bubbles = []
+    const selectedId = this.selectedId
 
     rated.forEach(function (zone, index) {
+      // 这个夜市正开着卡片时，星星挪到卡片里显示，地图上就先不画
+      if (zone._id === selectedId) return
+
       const center = geo.rectCenter(zone.ne, zone.sw)
       const x = rect.left + ((center.longitude - west) / (east - west)) * rect.width
       const y = rect.top + ((north - center.latitude) / (north - south)) * rect.height
@@ -381,6 +396,8 @@ Page({
     this.selectedId = found._id
     this.openDraft(found)
     this.render()
+    // 星星要挪进卡片里，地图上那份得重新算
+    this.updateBubbles()
   },
 
   // ---------- 卡片里的评分草稿 ----------
@@ -494,6 +511,8 @@ Page({
       this.selectedId = ''
       this.setData({ cardClosing: false })
       this.render()
+      // 卡片收回了，星星重新回到地图上
+      this.updateBubbles()
     }, CARD_CLOSE_ANIM_MS)
   },
 

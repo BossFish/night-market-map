@@ -141,6 +141,17 @@
   line-height: 1.3;
 }
 
+.card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.card__star {
+  flex-shrink: 0;
+  font-size: 34rpx;
+}
+
 .card__sub {
   margin-top: 4rpx;
   color: var(--text-secondary);
@@ -241,12 +252,28 @@
 }
 
 .chip {
+  position: relative;
+  overflow: hidden;
   margin: 0 12rpx 12rpx 0;
   padding: 10rpx 24rpx;
   border: 1rpx solid var(--divider);
   border-radius: 999rpx;
   color: var(--text-secondary);
   font-size: 26rpx;
+}
+
+/* 绿色填充：从胶囊左边长到对应百分比的位置。百分比本身不显示 */
+.chip__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(34, 197, 94, 0.28);
+  transition: width 420ms ease-out;
+}
+
+.chip__label {
+  position: relative;
 }
 
 .chip--on {

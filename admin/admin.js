@@ -79,9 +79,8 @@ function showBanner(text, kind) {
   box.classList.remove('hidden')
 
   if (bannerTimer) clearTimeout(bannerTimer)
-  if (kind === 'ok') {
-    bannerTimer = setTimeout(hideBanner, 2500)
-  }
+  // 成功提示一闪而过；出错的留久一点，但也别一直挡着界面，点一下能立刻关掉
+  bannerTimer = setTimeout(hideBanner, kind === 'ok' ? 2000 : 6000)
 }
 
 function hideBanner() {
@@ -167,7 +166,7 @@ function loadZones() {
 function emptyRow(text) {
   var tr = document.createElement('tr')
   var td = document.createElement('td')
-  td.colSpan = 7
+  td.colSpan = 6
   td.className = 'empty'
   td.textContent = text
   tr.appendChild(td)
@@ -233,8 +232,6 @@ function buildRow(zone) {
   tr.appendChild(textCell(zone.business_hours || '—'))
   tr.appendChild(coordCell(zone.ne))
   tr.appendChild(coordCell(zone.sw))
-  tr.appendChild(textCell(String(zone.sort_order == null ? 0 : zone.sort_order)))
-
   var statusTd = document.createElement('td')
   var tag = document.createElement('span')
   tag.className = 'tag ' + (visible ? 'tag--on' : 'tag--off')
@@ -263,7 +260,6 @@ function openEditor(zone) {
   el('fNameZh').value = zone ? zone.name_zh || '' : ''
   el('fNameEn').value = zone ? zone.name_en || '' : ''
   el('fHours').value = zone ? zone.business_hours || '' : ''
-  el('fSort').value = zone ? (zone.sort_order == null ? 0 : zone.sort_order) : state.zones.length + 1
   el('fVisible').checked = zone ? zone.is_visible !== false : true
 
   var ne = (zone && zone.ne) || {}
@@ -297,7 +293,6 @@ function collectForm() {
     name_zh: el('fNameZh').value.trim(),
     name_en: el('fNameEn').value.trim(),
     business_hours: el('fHours').value.trim(),
-    sort_order: Number(el('fSort').value) || 0,
     is_visible: el('fVisible').checked,
     ne: {
       latitude: Number(el('fNeLat').value),
@@ -742,6 +737,8 @@ function onFormChanged() {
 // ---------- 启动 ----------
 
 function bindEvents() {
+  el('banner').addEventListener('click', hideBanner)
+
   el('btnLogin').addEventListener('click', doLogin)
   el('keyInput').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') doLogin()
